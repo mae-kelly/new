@@ -1,0 +1,11 @@
+asyncio
+websockets
+requests
+solana
+base58
+sqlite3
+typing
+datetime
+logging
+json
+os

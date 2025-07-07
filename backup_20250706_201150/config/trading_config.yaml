@@ -1,0 +1,43 @@
+# Trading Engine Configuration
+
+trading:
+  max_position_size: 0.1          # Max 10% of portfolio per trade
+  min_confidence_score: 0.7       # ML confidence threshold
+  max_slippage: 0.05             # 5% max slippage
+  stop_loss_pct: 0.5             # 50% stop loss
+  take_profit_pct: 5.0           # 500% take profit
+  max_hold_time: 3600            # 1 hour max hold (seconds)
+  min_liquidity: 2000            # $2k minimum liquidity
+  max_sell_tax: 0.1              # 10% maximum sell tax
+  max_daily_trades: 50           # Daily trade limit
+  risk_multiplier: 1.0           # Risk adjustment factor
+
+execution:
+  gas_limit: 200000              # Gas limit for transactions
+  priority_fee: 5000             # Priority fee in microlamports
+  max_retries: 3                 # Max transaction retries
+  retry_delay: 5                 # Seconds between retries
+  slippage_tolerance: 0.05       # 5% slippage tolerance
+
+portfolio:
+  initial_balance: 10.0          # Starting balance in SOL
+  emergency_stop_loss: 0.9       # Stop trading at 90% loss
+  max_positions: 10              # Maximum concurrent positions
+  rebalance_threshold: 0.1       # Rebalance when allocation > 10% off target
+
+risk_management:
+  max_drawdown: 0.5              # 50% max drawdown
+  position_correlation_limit: 0.7 # Max correlation between positions
+  sector_concentration_limit: 0.3 # Max 30% in similar tokens
+  volatility_adjustment: true     # Adjust position size by volatility
+
+alerts:
+  telegram_enabled: false
+  discord_enabled: false
+  email_enabled: false
+  webhook_url: ""
+  
+  # Alert thresholds
+  profit_alert: 2.0              # Alert on 200%+ profit
+  loss_alert: 0.3                # Alert on 30%+ loss
+  position_alert: 0.05           # Alert when position > 5% of portfolio
