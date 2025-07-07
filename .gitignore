@@ -8,3 +8,5 @@ __pycache__/
 venv/
 .vscode/
 *.pid
+backups/
+backup_20250706_201150/
