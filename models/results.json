@@ -1,0 +1,28 @@
+{
+  "mappings": [
+    {
+      "source": "enterprise_inventory.hostname",
+      "metric": "host_coverage",
+      "confidence": 0.6,
+      "pattern_type": "host",
+      "samples": [
+        "srv-web-01",
+        "db-prod-mysql",
+        "CORP-LAPTOP-01"
+      ]
+    },
+    {
+      "source": "security_telemetry.agent_status",
+      "metric": "host_coverage",
+      "confidence": 0.5,
+      "pattern_type": "host",
+      "samples": [
+        "defender-online-v4.18",
+        "falcon-sensor-6.45",
+        "tanium-client-7.4.6"
+      ]
+    }
+  ],
+  "timestamp": "2025-07-16T21:06:09.294256",
+  "total_mappings": 2
+}
