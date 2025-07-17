@@ -1,44 +1,85 @@
 #!/bin/bash
 
-cat > docker_alternative_registry.sh << 'EOF'
+cat > use_crt_key_no_sudo.sh << 'EOF'
 #!/bin/bash
 
-echo "🐳 Docker with Alternative Registries"
-echo "====================================="
+echo "🔐 Using Your CRT/KEY Files (No Sudo Required)"
+echo "=============================================="
 
-echo "Step 1: Configuring Docker for alternative registries..."
+# Find your certificate files
+CRT_FILE=$(find ssl/ -name "*.crt" | head -1)
+KEY_FILE=$(find ssl/ -name "*.key" | head -1)
 
-# Configure Docker to use alternative registries
+if [ ! -f "$CRT_FILE" ]; then
+    echo "❌ No .crt file found in ssl/ folder"
+    ls -la ssl/
+    exit 1
+fi
+
+if [ ! -f "$KEY_FILE" ]; then
+    echo "❌ No .key file found in ssl/ folder"
+    ls -la ssl/
+    exit 1
+fi
+
+echo "✅ Found certificate: $CRT_FILE"
+echo "✅ Found key: $KEY_FILE"
+
+echo "Step 1: Adding certificate to user keychain (no sudo needed)..."
+
+# Add to user keychain only (no admin required)
+security add-trusted-cert -d -r trustRoot -k ~/Library/Keychains/login.keychain "$CRT_FILE"
+echo "✅ Added certificate to user keychain"
+
+echo "Step 2: Configuring Docker Desktop settings directly..."
+
+# Configure Docker Desktop to bypass certificate verification
 DOCKER_CONFIG_DIR="$HOME/.docker"
 mkdir -p "$DOCKER_CONFIG_DIR"
 
+# Create daemon.json with insecure registries (bypasses cert verification)
 cat > "$DOCKER_CONFIG_DIR/daemon.json" << 'JSON'
 {
-  "registry-mirrors": [
-    "https://mirror.gcr.io",
-    "https://quay.io",
-    "https://gcr.io"
-  ],
   "insecure-registries": [
     "registry-1.docker.io",
     "docker.io",
-    "index.docker.io"
+    "index.docker.io",
+    "registry.docker.io"
   ],
+  "registry-mirrors": [],
   "dns": ["8.8.8.8", "1.1.1.1"],
-  "mtu": 1450
+  "experimental": false,
+  "features": {
+    "buildkit": true
+  }
 }
 JSON
 
-echo "✅ Configured alternative registries"
+echo "✅ Created Docker daemon configuration"
 
-# Restart Docker
-echo "Restarting Docker..."
-pkill -f "Docker Desktop" 2>/dev/null || true
-sleep 3
+# Add certificates to Docker-specific directories
+REGISTRIES=("registry-1.docker.io" "docker.io" "index.docker.io")
+
+for registry in "${REGISTRIES[@]}"; do
+    mkdir -p "$DOCKER_CONFIG_DIR/certs.d/$registry"
+    cp "$CRT_FILE" "$DOCKER_CONFIG_DIR/certs.d/$registry/ca.crt"
+    cp "$KEY_FILE" "$DOCKER_CONFIG_DIR/certs.d/$registry/client.key"
+    cp "$CRT_FILE" "$DOCKER_CONFIG_DIR/certs.d/$registry/client.cert"
+    echo "✅ Added certificates for $registry"
+done
+
+echo "Step 3: Restarting Docker Desktop..."
+
+# Stop Docker Desktop
+osascript -e 'quit app "Docker"' 2>/dev/null || true
+sleep 5
+
+# Start Docker Desktop
 open /Applications/Docker.app
 sleep 15
 
 # Wait for Docker daemon
+echo "Waiting for Docker daemon..."
 for i in {1..30}; do
     if docker info >/dev/null 2>&1; then
         echo "✅ Docker daemon ready"
@@ -49,104 +90,41 @@ for i in {1..30}; do
     fi
 done
 
-echo "Step 2: Trying alternative Python sources..."
+echo "Step 4: Testing Docker connectivity with your certificates..."
 
-# Try different registry sources for Python
-PYTHON_SOURCES=(
-    "mirror.gcr.io/library/python:3.11-slim"
-    "quay.io/fedora/python:3.11"
-    "gcr.io/distroless/python3-debian11"
-)
-
-WORKING_IMAGE=""
-
-for source in "${PYTHON_SOURCES[@]}"; do
-    echo "Trying $source..."
-    if timeout 60 docker pull "$source" >/dev/null 2>&1; then
-        echo "✅ Successfully pulled $source"
-        WORKING_IMAGE="$source"
-        break
+# Test Docker Hub access
+if timeout 45 docker pull hello-world >/dev/null 2>&1; then
+    echo "✅ Docker Hub working with your certificates!"
+    docker rmi hello-world >/dev/null 2>&1
+    
+    # Test Python image
+    if timeout 60 docker pull python:3.11-slim >/dev/null 2>&1; then
+        echo "✅ Python image available"
+        echo "🎉 Certificate configuration successful!"
     else
-        echo "❌ Failed to pull $source"
+        echo "⚠️ Python image still having issues"
     fi
-done
-
-if [ -z "$WORKING_IMAGE" ]; then
-    echo "❌ No alternative registries working"
-    echo "Trying direct base image creation..."
 else
-    echo "✅ Using working image: $WORKING_IMAGE"
+    echo "❌ Docker Hub still blocked"
+    echo "Your corporate network may be doing deep packet inspection"
 fi
+
+echo ""
+echo "Certificate configuration complete!"
+echo "Files configured:"
+echo "• User keychain: ~/Library/Keychains/login.keychain"
+echo "• Docker daemon: $DOCKER_CONFIG_DIR/daemon.json"
+echo "• Docker certs: $DOCKER_CONFIG_DIR/certs.d/"
 EOF
 
-cat > create_base_image.sh << 'EOF'
+cat > build_with_your_certs.sh << 'EOF'
 #!/bin/bash
 
-echo "🏗️ Creating Base Image from Scratch"
-echo "=================================="
+echo "🚀 Build AO1 Scanner with Your Certificates"
+echo "==========================================="
 
-# Create a minimal base image using scratch or alpine (smaller, often works)
-echo "Attempting to pull minimal base images..."
-
-# Try Alpine (much smaller, often works when others don't)
-if timeout 30 docker pull alpine:3.18 >/dev/null 2>&1; then
-    echo "✅ Alpine available - creating Python base"
-    
-    cat > Dockerfile.base << 'DOCKERFILE'
-FROM alpine:3.18
-
-# Install Python and dependencies
-RUN apk add --no-cache \
-    python3 \
-    py3-pip \
-    curl \
-    ca-certificates \
-    gcc \
-    musl-dev \
-    python3-dev
-
-# Create symlinks
-RUN ln -sf /usr/bin/python3 /usr/bin/python
-RUN ln -sf /usr/bin/pip3 /usr/bin/pip
-
-# Update certificates
-RUN update-ca-certificates
-
-WORKDIR /app
-
-# Test Python installation
-RUN python --version && pip --version
-DOCKERFILE
-
-    echo "Building custom Python base image..."
-    docker build -f Dockerfile.base -t ao1-python-base .
-    
-    if [ $? -eq 0 ]; then
-        echo "✅ Custom Python base created successfully"
-        BASE_IMAGE="ao1-python-base"
-    else
-        echo "❌ Failed to create custom base"
-        exit 1
-    fi
-    
-else
-    echo "❌ Cannot pull any base images"
-    echo "Network is completely blocking Docker registries"
-    exit 1
-fi
-EOF
-
-cat > build_ao1_custom.sh << 'EOF'
-#!/bin/bash
-
-echo "🚀 Build AO1 Scanner with Custom Base"
-echo "===================================="
-
-# Configure alternative registries
-./docker_alternative_registry.sh
-
-# Create custom base if needed
-./create_base_image.sh
+# Configure certificates
+./use_crt_key_no_sudo.sh
 
 if [ ! -f ".env" ]; then
     echo "❌ .env file missing"
@@ -160,9 +138,10 @@ if [ "$BIGQUERY_PROJECT_ID" = "your-project-id" ]; then
     exit 1
 fi
 
-echo "Creating project files..."
+echo "Creating project structure..."
 mkdir -p credentials data outputs logs results
 
+# Create BigQuery credentials
 cat > credentials/bigquery-service-account.json << JSON
 {
   "type": "$BIGQUERY_TYPE",
@@ -178,38 +157,58 @@ cat > credentials/bigquery-service-account.json << JSON
 }
 JSON
 
-# Create requirements for Alpine/minimal install
+# Create requirements.txt
 cat > requirements.txt << 'REQS'
 fastapi==0.104.1
-uvicorn==0.24.0
+uvicorn[standard]==0.24.0
 google-cloud-bigquery==3.12.0
 google-cloud-resource-manager==1.10.4
 google-auth==2.23.4
 PyJWT==2.8.0
 duckdb==0.9.2
-pydantic==2.5.0
+pydantic[email]==2.5.0
 python-dotenv==1.0.0
 structlog==23.2.0
 httpx==0.25.2
+redis==5.0.1
 REQS
 
-# Create Dockerfile using custom base
-cat > Dockerfile << 'DOCKERFILE'
-FROM ao1-python-base
+echo "Testing Docker image pull..."
+if timeout 60 docker pull python:3.11-slim >/dev/null 2>&1; then
+    echo "✅ Using Python base image"
+    
+    # Create Dockerfile with your certificates
+    cat > Dockerfile << 'DOCKERFILE'
+FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 
-# Copy SSL certificates if available
-COPY ssl/*.crt /usr/local/share/ca-certificates/ 2>/dev/null || true
-RUN update-ca-certificates 2>/dev/null || true
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Python packages
+# Copy YOUR SSL certificates into the container
+COPY ssl/*.crt /usr/local/share/ca-certificates/
+COPY ssl/*.key /usr/local/share/ca-certificates/
+
+# Update certificate store with YOUR certificates
+RUN update-ca-certificates
+
+# Set environment variables to use YOUR certificates
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+
+# Install requirements
 COPY requirements.txt .
-RUN pip install --upgrade pip --no-cache-dir
-RUN pip install -r requirements.txt --no-cache-dir
+RUN pip install --upgrade pip
+RUN pip install -r requirements.txt
 
 # Copy application
 COPY . .
@@ -225,13 +224,59 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 CMD ["python", "run_server.py"]
 DOCKERFILE
 
-echo "Building AO1 Scanner..."
+elif timeout 30 docker pull alpine:latest >/dev/null 2>&1; then
+    echo "✅ Using Alpine base image"
+    
+    cat > Dockerfile << 'DOCKERFILE'
+FROM alpine:latest
+
+ENV PYTHONUNBUFFERED=1
+WORKDIR /app
+
+# Install Python and dependencies
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    curl \
+    ca-certificates \
+    gcc \
+    musl-dev \
+    python3-dev
+
+# Copy YOUR certificates
+COPY ssl/*.crt /usr/local/share/ca-certificates/
+COPY ssl/*.key /usr/local/share/ca-certificates/
+RUN update-ca-certificates
+
+# Create python symlinks
+RUN ln -sf /usr/bin/python3 /usr/bin/python
+RUN ln -sf /usr/bin/pip3 /usr/bin/pip
+
+# Install requirements
+COPY requirements.txt .
+RUN pip install --upgrade pip
+RUN pip install -r requirements.txt
+
+COPY . .
+RUN mkdir -p data outputs logs credentials results
+
+EXPOSE 8000
+CMD ["python", "run_server.py"]
+DOCKERFILE
+
+else
+    echo "❌ Cannot pull any base images"
+    echo "Network completely blocking Docker registries"
+    exit 1
+fi
+
+echo "Building AO1 Scanner with your certificates..."
 docker build -t ao1-scanner:latest .
 
 if [ $? -eq 0 ]; then
     echo "✅ Build successful!"
     
-    # Create docker-compose for custom build
+    # Create docker-compose.yml
     cat > docker-compose.yml << 'YAML'
 version: '3.8'
 
@@ -243,6 +288,8 @@ services:
     environment:
       - DATABASE_PATH=/app/data/scanner.duckdb
       - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/bigquery-service-account.json
+      - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
       - ENVIRONMENT=production
       - LOG_LEVEL=INFO
     env_file:
@@ -253,9 +300,9 @@ services:
       - ./logs:/app/logs
       - ./credentials:/app/credentials
       - ./results:/app/results
+      - ./ssl:/app/ssl:ro
     restart: unless-stopped
 
-  # Use Alpine Redis (smaller, more likely to work)
   redis:
     image: redis:7-alpine
     ports:
@@ -277,91 +324,41 @@ YAML
     docker-compose up -d
     
     echo "Waiting for services..."
-    sleep 15
+    sleep 20
     
     PORT=${PORT:-8000}
     if curl -f http://localhost:${PORT}/health >/dev/null 2>&1; then
         echo "✅ AO1 Scanner running at http://localhost:${PORT}"
         echo ""
-        echo "🎉 SUCCESS! Built with custom Docker base"
-        echo "======================================"
+        echo "🎉 SUCCESS with your CRT/KEY files!"
+        echo "================================="
         echo "• API: http://localhost:${PORT}"
         echo "• Health: http://localhost:${PORT}/health"
-        echo "• Dashboard: http://localhost:${PORT}/dashboard/stats"
+        echo "• Uses YOUR SSL certificates from ssl/ folder"
     else
         echo "❌ Service not responding"
         docker-compose logs --tail=10 ao1-scanner
     fi
-    
 else
     echo "❌ Build failed"
 fi
 EOF
 
-cat > direct_build_approach.sh << 'EOF'
-#!/bin/bash
+chmod +x use_crt_key_no_sudo.sh build_with_your_certs.sh
 
-echo "🎯 Direct Build Approach (No External Images)"
-echo "============================================="
-
-echo "Creating completely self-contained Docker build..."
-
-# Create a Dockerfile that builds everything from source
-cat > Dockerfile.fromsource << 'DOCKERFILE'
-# Use the smallest possible base
-FROM scratch
-
-# Copy a minimal Linux filesystem
-# This approach builds everything locally without external dependencies
-ADD https://dl-cdn.alpinelinux.org/alpine/v3.18/releases/x86_64/alpine-minirootfs-3.18.4-x86_64.tar.gz /
-RUN tar -xzf /alpine-minirootfs-3.18.4-x86_64.tar.gz && rm /alpine-minirootfs-3.18.4-x86_64.tar.gz
-
-# Install Python and dependencies
-RUN apk add --no-cache python3 py3-pip curl ca-certificates gcc musl-dev python3-dev
-
-WORKDIR /app
-
-# Copy SSL certificates
-COPY ssl/*.crt /usr/local/share/ca-certificates/ 2>/dev/null || true
-RUN update-ca-certificates 2>/dev/null || true
-
-# Install Python packages
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
-
-COPY . .
-RUN mkdir -p data outputs logs credentials results
-
-EXPOSE 8000
-CMD ["python3", "run_server.py"]
-DOCKERFILE
-
-echo "⚠️ This approach downloads Alpine Linux directly"
-echo "If corporate firewall blocks this too, Docker deployment may not be possible"
-
-read -p "Try this approach? (y/n): " choice
-if [ "$choice" = "y" ]; then
-    echo "Building from source..."
-    docker build -f Dockerfile.fromsource -t ao1-scanner:fromsource .
-else
-    echo "Consider using the Python-only approach instead"
-fi
-EOF
-
-chmod +x docker_alternative_registry.sh create_base_image.sh build_ao1_custom.sh direct_build_approach.sh
-
-echo "✅ Docker Alternative Registry Solution Created!"
+echo "✅ No-Sudo Certificate Solution Created!"
 echo ""
-echo "🐳 Docker solutions (in order of likelihood to work):"
+echo "🔐 Using your existing CRT and KEY files (no sudo required):"
 echo ""
-echo "1. Alternative registries + Alpine base:"
-echo "   ./build_ao1_custom.sh"
+echo "1. Configure Docker with your certificates:"
+echo "   ./use_crt_key_no_sudo.sh"
 echo ""
-echo "2. Direct build from source:"
-echo "   ./direct_build_approach.sh"
+echo "2. Build AO1 Scanner with your certificates:"
+echo "   ./build_with_your_certs.sh"
 echo ""
-echo "These approaches:"
-echo "• Use mirror.gcr.io, quay.io instead of Docker Hub"
-echo "• Build custom Python base from Alpine"
-echo "• Avoid standard docker.io registry"
-echo "• Create self-contained Docker deployment"
+echo "This will:"
+echo "• Add your CRT to user keychain (no admin required)"
+echo "• Configure Docker to use your certificates"
+echo "• Copy your CRT/KEY into the Docker container"
+echo "• Set up proper SSL environment variables"
+echo "• Build and deploy AO1 Scanner"
