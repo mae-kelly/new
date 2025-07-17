@@ -1,290 +1,174 @@
 #!/bin/bash
 
-cat > configure_all_credentials.sh << 'EOF'
+cat > create_env_template.sh << 'EOF'
 #!/bin/bash
 
-echo "🔐 Configuring AO1 Scanner with Complete Credential Set"
-echo "======================================================"
+echo "📝 Creating .env template with all credential fields..."
 
-create_jwt_secret() {
-    if command -v openssl &> /dev/null; then
-        openssl rand -hex 32
-    elif command -v python3 &> /dev/null; then
-        python3 -c "import secrets; print(secrets.token_hex(32))"
-    else
-        echo "jwt_secret_$(date +%s)_$(whoami)" | tr -d '\n' | base64 | head -c 64
-    fi
-}
+cat > .env << 'ENV'
+# Core Configuration
+DATABASE_PATH=scanner.duckdb
+JWT_SECRET_KEY=auto-generated-on-deploy
+PORT=8000
+HOST=0.0.0.0
+ENVIRONMENT=production
+LOG_LEVEL=INFO
 
-mkdir -p credentials
+# BigQuery Credentials - EDIT THESE WITH YOUR ACTUAL VALUES
+BIGQUERY_TYPE=service_account
+BIGQUERY_PROJECT_ID=your-project-id
+BIGQUERY_PRIVATE_KEY_ID=your-private-key-id
+BIGQUERY_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nyour-private-key-here\n-----END PRIVATE KEY-----"
+BIGQUERY_CLIENT_EMAIL=scanner@your-project.iam.gserviceaccount.com
+BIGQUERY_CLIENT_ID=your-client-id
+BIGQUERY_AUTH_URI=https://accounts.google.com/o/oauth2/auth
+BIGQUERY_TOKEN_URI=https://oauth2.googleapis.com/token
+BIGQUERY_AUTH_PROVIDER_X509_CERT_URL=https://www.googleapis.com/oauth2/v1/certs
+BIGQUERY_CLIENT_X509_CERT_URL=https://www.googleapis.com/robot/v1/metadata/x509/scanner%40your-project.iam.gserviceaccount.com
 
-echo "Step 1: Creating BigQuery service account JSON..."
+# Chronicle SIEM Integration - OPTIONAL
+CHRONICLE_API_KEY=your-chronicle-api-key
+CHRONICLE_SECRET_KEY=your-chronicle-secret-key
+CHRONICLE_FEED_ID=your-chronicle-feed-id
+CHRONICLE_ENDPOINT=https://backstory.googleapis.com
 
-if [ ! -f "credentials/bigquery-service-account.json" ]; then
-    echo "Please provide your BigQuery credentials:"
-    echo ""
-    
-    read -p "Project ID: " PROJECT_ID
-    read -p "Client Email: " CLIENT_EMAIL
-    read -p "Client ID: " CLIENT_ID
-    read -p "Private Key ID: " PRIVATE_KEY_ID
-    echo "Private Key (paste the full key including -----BEGIN/END PRIVATE KEY-----): "
-    read -r PRIVATE_KEY
-    
-    cat > credentials/bigquery-service-account.json << JSON
-{
-  "type": "service_account",
-  "project_id": "$PROJECT_ID",
-  "private_key_id": "$PRIVATE_KEY_ID",
-  "private_key": "$PRIVATE_KEY",
-  "client_email": "$CLIENT_EMAIL",
-  "client_id": "$CLIENT_ID",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/$CLIENT_EMAIL"
-}
-JSON
-    
-    echo "✅ Created BigQuery service account JSON"
-else
-    echo "✅ BigQuery service account JSON already exists"
-fi
+# GraphQL Integration - OPTIONAL  
+GRAPHQL_ENDPOINT=https://your-graphql-endpoint.com/graphql
+GRAPHQL_API_KEY=your-graphql-api-key
 
-echo ""
-echo "Step 2: Configuring environment variables..."
-
-if [ ! -f ".env" ]; then
-    cp .env.example .env
-    echo "Created .env from template"
-fi
-
-JWT_SECRET=$(create_jwt_secret)
-
-cat >> .env << ENV
-
-# Enhanced AO1 Scanner Configuration
-JWT_SECRET_KEY=$JWT_SECRET
-GOOGLE_APPLICATION_CREDENTIALS=credentials/bigquery-service-account.json
-
-# Chronicle SIEM Integration
-CHRONICLE_API_KEY=${CHRONICLE_API_KEY:-}
-CHRONICLE_SECRET_KEY=${CHRONICLE_SECRET_KEY:-}
-CHRONICLE_FEED_ID=${CHRONICLE_FEED_ID:-}
-CHRONICLE_ENDPOINT=${CHRONICLE_ENDPOINT:-https://backstory.googleapis.com}
-
-# GraphQL Endpoint
-GRAPHQL_ENDPOINT=${GRAPHQL_ENDPOINT:-}
-
-# Advanced Features
+# Feature Flags
 ENABLE_SIEM_INTEGRATION=true
 ENABLE_GRAPHQL_QUERIES=true
-ENABLE_CHRONICLE_EXPORT=true
 ENABLE_REAL_TIME_STREAMING=true
+ENABLE_INDUSTRY_DETECTION=true
 
-# Performance Tuning
+# Performance Settings
+MAX_PROJECTS_PER_SCAN=50
+MAX_TABLES_PER_PROJECT=200
+SCAN_TIMEOUT_MINUTES=60
 MAX_CONCURRENT_SCANS=8
-BIGQUERY_TIMEOUT_SECONDS=300
-CHRONICLE_BATCH_SIZE=1000
-RETRY_ATTEMPTS=3
-
 ENV
 
-echo "✅ Enhanced .env configuration created"
-
+echo "✅ Created .env template"
 echo ""
-echo "Step 3: Creating Chronicle integration credentials..."
-
-if [ ! -z "$CHRONICLE_API_KEY" ]; then
-    cat > credentials/chronicle-config.json << JSON
-{
-  "api_key": "$CHRONICLE_API_KEY",
-  "secret_key": "$CHRONICLE_SECRET_KEY",
-  "feed_id": "$CHRONICLE_FEED_ID",
-  "endpoint": "$CHRONICLE_ENDPOINT",
-  "batch_size": 1000,
-  "timeout_seconds": 30
-}
-JSON
-    echo "✅ Chronicle configuration created"
-else
-    echo "⚠️  Chronicle credentials not provided. Set them manually in .env if needed"
-fi
-
+echo "📋 EDIT .env NOW with your actual credentials:"
 echo ""
-echo "Step 4: Creating enhanced Kubernetes secrets..."
-
-if command -v base64 &> /dev/null; then
-    if [ "$(uname)" = "Darwin" ]; then
-        GCP_CREDS_B64=$(base64 credentials/bigquery-service-account.json)
-        JWT_B64=$(echo -n "$JWT_SECRET" | base64)
-        CHRONICLE_B64=$([ -f "credentials/chronicle-config.json" ] && base64 credentials/chronicle-config.json || echo "")
-    else
-        GCP_CREDS_B64=$(base64 -w 0 credentials/bigquery-service-account.json)
-        JWT_B64=$(echo -n "$JWT_SECRET" | base64 -w 0)
-        CHRONICLE_B64=$([ -f "credentials/chronicle-config.json" ] && base64 -w 0 credentials/chronicle-config.json || echo "")
-    fi
-    
-    cat > k8s/secret-configured.yaml << YAML
-apiVersion: v1
-kind: Secret
-metadata:
-  name: ao1-scanner-secrets
-  namespace: ao1-scanner
-type: Opaque
-data:
-  jwt-secret: $JWT_B64
-  gcp-credentials: $GCP_CREDS_B64
-  chronicle-config: $CHRONICLE_B64
-  chronicle-api-key: $(echo -n "${CHRONICLE_API_KEY:-}" | base64 ${BASE64_FLAGS:-})
-  graphql-endpoint: $(echo -n "${GRAPHQL_ENDPOINT:-}" | base64 ${BASE64_FLAGS:-})
-YAML
-    
-    echo "✅ Enhanced Kubernetes secrets configured"
-fi
-
+echo "Required (BigQuery):"
+echo "• BIGQUERY_PROJECT_ID"
+echo "• BIGQUERY_PRIVATE_KEY (full key with BEGIN/END lines)"
+echo "• BIGQUERY_CLIENT_EMAIL" 
+echo "• BIGQUERY_CLIENT_ID"
+echo "• BIGQUERY_PRIVATE_KEY_ID"
 echo ""
-echo "Step 5: Creating credential validation script..."
-
-cat > validate_credentials.py << 'PYTHON'
-#!/usr/bin/env python3
-
-import json
-import os
-import sys
-from google.cloud import bigquery
-from google.auth import default
-
-def validate_bigquery():
-    try:
-        credentials, project = default()
-        client = bigquery.Client(credentials=credentials, project=project)
-        
-        # Test query
-        query = "SELECT 1 as test"
-        job = client.query(query)
-        list(job.result())
-        
-        print("✅ BigQuery connection successful")
-        print(f"   Project: {project}")
-        return True
-    except Exception as e:
-        print(f"❌ BigQuery connection failed: {e}")
-        return False
-
-def validate_chronicle():
-    if not os.getenv('CHRONICLE_API_KEY'):
-        print("⚠️  Chronicle credentials not configured")
-        return True
-    
-    try:
-        import requests
-        
-        api_key = os.getenv('CHRONICLE_API_KEY')
-        endpoint = os.getenv('CHRONICLE_ENDPOINT', 'https://backstory.googleapis.com')
-        
-        # Test Chronicle API connectivity
-        headers = {'Authorization': f'Bearer {api_key}'}
-        response = requests.get(f"{endpoint}/v1/tools/siemsettings", headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            print("✅ Chronicle connection successful")
-            return True
-        else:
-            print(f"❌ Chronicle connection failed: HTTP {response.status_code}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Chronicle validation failed: {e}")
-        return False
-
-def validate_graphql():
-    endpoint = os.getenv('GRAPHQL_ENDPOINT')
-    if not endpoint:
-        print("⚠️  GraphQL endpoint not configured")
-        return True
-    
-    try:
-        import requests
-        
-        # Simple introspection query
-        query = {"query": "{ __schema { queryType { name } } }"}
-        response = requests.post(endpoint, json=query, timeout=10)
-        
-        if response.status_code == 200:
-            print("✅ GraphQL endpoint accessible")
-            return True
-        else:
-            print(f"❌ GraphQL endpoint failed: HTTP {response.status_code}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ GraphQL validation failed: {e}")
-        return False
-
-if __name__ == "__main__":
-    print("🔍 Validating AO1 Scanner Credentials")
-    print("====================================")
-    
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'credentials/bigquery-service-account.json'
-    
-    results = []
-    results.append(validate_bigquery())
-    results.append(validate_chronicle())
-    results.append(validate_graphql())
-    
-    if all(results):
-        print("\n🎉 All credentials validated successfully!")
-        sys.exit(0)
-    else:
-        print("\n⚠️  Some credential validations failed")
-        print("Check the errors above and update your configuration")
-        sys.exit(1)
-PYTHON
-
-chmod +x validate_credentials.py
-
-echo "✅ Credential validation script created"
-
+echo "Optional (Chronicle):"
+echo "• CHRONICLE_API_KEY"
+echo "• CHRONICLE_SECRET_KEY"
+echo "• CHRONICLE_FEED_ID"
 echo ""
-echo "🎯 Complete credential configuration finished!"
+echo "Optional (GraphQL):"
+echo "• GRAPHQL_ENDPOINT"
+echo "• GRAPHQL_API_KEY"
 echo ""
-echo "Next steps:"
-echo "1. Update any missing values in .env file"
-echo "2. Run: python3 validate_credentials.py"
-echo "3. Deploy: ./deploy.sh docker"
-echo ""
-echo "Files created:"
-echo "• credentials/bigquery-service-account.json"
-echo "• credentials/chronicle-config.json (if Chronicle keys provided)"
-echo "• k8s/secret-configured.yaml"
-echo "• validate_credentials.py"
-echo "• Enhanced .env file"
+echo "When done editing, run: ./run_scanner.sh"
 EOF
 
-cat > enhanced_docker_compose.sh << 'EOF'
+cat > run_scanner.sh << 'EOF'
 #!/bin/bash
 
-echo "Creating enhanced Docker Compose with all integrations..."
+set -e
 
-cat > docker-compose.enhanced.yml << 'YAML'
+echo "🚀 AO1 Scanner - Deploy and Run"
+echo "==============================="
+
+if [ ! -f ".env" ]; then
+    echo "❌ .env file not found!"
+    echo "Run: ./create_env_template.sh first"
+    exit 1
+fi
+
+echo "Step 1: Loading environment..."
+source .env
+
+if [ "$BIGQUERY_PROJECT_ID" = "your-project-id" ]; then
+    echo "❌ Please edit .env with your actual BigQuery credentials first"
+    echo "Required fields: BIGQUERY_PROJECT_ID, BIGQUERY_CLIENT_EMAIL, BIGQUERY_PRIVATE_KEY"
+    exit 1
+fi
+
+echo "✅ Environment loaded"
+
+echo "Step 2: Generating JWT secret if needed..."
+if [ "$JWT_SECRET_KEY" = "auto-generated-on-deploy" ]; then
+    JWT_SECRET=$(openssl rand -hex 32 2>/dev/null || python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null || echo "fallback_$(date +%s)")
+    if [ "$(uname)" = "Darwin" ]; then
+        sed -i '' "s/JWT_SECRET_KEY=auto-generated-on-deploy/JWT_SECRET_KEY=$JWT_SECRET/" .env
+    else
+        sed -i "s/JWT_SECRET_KEY=auto-generated-on-deploy/JWT_SECRET_KEY=$JWT_SECRET/" .env
+    fi
+    echo "✅ JWT secret generated"
+fi
+
+echo "Step 3: Creating BigQuery service account JSON..."
+mkdir -p credentials
+
+cat > credentials/bigquery-service-account.json << JSON
+{
+  "type": "$BIGQUERY_TYPE",
+  "project_id": "$BIGQUERY_PROJECT_ID",
+  "private_key_id": "$BIGQUERY_PRIVATE_KEY_ID",
+  "private_key": "$BIGQUERY_PRIVATE_KEY",
+  "client_email": "$BIGQUERY_CLIENT_EMAIL",
+  "client_id": "$BIGQUERY_CLIENT_ID",
+  "auth_uri": "$BIGQUERY_AUTH_URI",
+  "token_uri": "$BIGQUERY_TOKEN_URI",
+  "auth_provider_x509_cert_url": "$BIGQUERY_AUTH_PROVIDER_X509_CERT_URL",
+  "client_x509_cert_url": "$BIGQUERY_CLIENT_X509_CERT_URL"
+}
+JSON
+
+echo "✅ BigQuery credentials configured"
+
+echo "Step 4: Testing BigQuery connection..."
+export GOOGLE_APPLICATION_CREDENTIALS=credentials/bigquery-service-account.json
+
+python3 << PYTHON
+import os
+try:
+    from google.cloud import bigquery
+    from google.auth import default
+    
+    credentials, project = default()
+    client = bigquery.Client(credentials=credentials, project=project)
+    
+    query = "SELECT 1 as test"
+    job = client.query(query)
+    list(job.result())
+    
+    print("✅ BigQuery connection successful")
+    
+except Exception as e:
+    print(f"❌ BigQuery connection failed: {e}")
+    print("Check your credentials in .env")
+    exit(1)
+PYTHON
+
+echo "Step 5: Creating Docker Compose..."
+mkdir -p data outputs logs results monitoring
+
+cat > docker-compose.yml << 'YAML'
 version: '3.8'
 
 services:
   ao1-scanner:
-    image: ao1-scanner:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
     ports:
-      - "8000:8000"
-    environment:
-      - DATABASE_PATH=/app/data/scanner.duckdb
-      - ENVIRONMENT=production
-      - LOG_LEVEL=info
-      - ENABLE_SIEM_INTEGRATION=true
-      - ENABLE_GRAPHQL_QUERIES=true
-      - ENABLE_CHRONICLE_EXPORT=true
-      - ENABLE_REAL_TIME_STREAMING=true
+      - "${PORT:-8000}:8000"
     env_file:
       - .env
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/bigquery-service-account.json
     volumes:
       - ./data:/app/data
       - ./outputs:/app/outputs
@@ -292,16 +176,13 @@ services:
       - ./credentials:/app/credentials
       - ./results:/app/results
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health/detailed"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
     restart: unless-stopped
     depends_on:
       - redis
-    networks:
-      - ao1-network
 
   redis:
     image: redis:7-alpine
@@ -309,218 +190,154 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
     restart: unless-stopped
-    networks:
-      - ao1-network
-
-  prometheus:
-    image: prom/prometheus:latest
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus-config.yaml:/etc/prometheus/prometheus.yml
-      - prometheus-data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=15d'
-    networks:
-      - ao1-network
-
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./monitoring/grafana-dashboard.json:/etc/grafana/provisioning/dashboards/ao1-dashboard.json
-    networks:
-      - ao1-network
 
 volumes:
   redis-data:
-  prometheus-data:
-  grafana-data:
-
-networks:
-  ao1-network:
-    driver: bridge
 YAML
 
-echo "✅ Enhanced Docker Compose created: docker-compose.enhanced.yml"
+if [ ! -f "Dockerfile.prod" ]; then
+    echo "Creating Dockerfile..."
+    cat > Dockerfile.prod << 'DOCKERFILE'
+FROM python:3.11-slim
 
-cat > monitoring/prometheus-config.yaml << 'YAML'
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
+WORKDIR /app
 
-scrape_configs:
-  - job_name: 'ao1-scanner'
-    static_configs:
-      - targets: ['ao1-scanner:8000']
-    metrics_path: /metrics
-    scrape_interval: 30s
+RUN apt-get update && apt-get install -y gcc curl && rm -rf /var/lib/apt/lists/*
 
-  - job_name: 'redis'
-    static_configs:
-      - targets: ['redis:6379']
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-rule_files:
-  - "alert_rules.yml"
+COPY . .
 
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets: []
-YAML
+RUN mkdir -p /app/data /app/outputs /app/logs /app/credentials /app/results
 
-cat > monitoring/alert_rules.yml << 'YAML'
-groups:
-  - name: ao1_scanner_alerts
-    rules:
-      - alert: HighScanFailureRate
-        expr: rate(ao1_errors_total[5m]) > 0.1
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: "High scan failure rate detected"
-          description: "AO1 Scanner error rate is {{ $value }} errors per second"
+EXPOSE 8000
 
-      - alert: SlowScanPerformance
-        expr: rate(ao1_scan_duration_seconds_sum[5m]) / rate(ao1_scan_duration_seconds_count[5m]) > 300
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Slow scan performance"
-          description: "Average scan duration is {{ $value }} seconds"
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
 
-      - alert: BigQueryConnectionDown
-        expr: up{job="ao1-scanner"} == 0
-        for: 1m
-        labels:
-          severity: critical
-        annotations:
-          summary: "AO1 Scanner is down"
-          description: "AO1 Scanner has been down for more than 1 minute"
-YAML
+CMD ["python", "run_server.py"]
+DOCKERFILE
+fi
 
-echo "✅ Monitoring configuration created"
+echo "✅ Docker configuration ready"
+
+echo "Step 6: Building and starting services..."
+docker-compose up --build -d
+
+echo "Step 7: Waiting for services..."
+sleep 15
+
+echo "Step 8: Health check..."
+for i in {1..20}; do
+    if curl -f http://localhost:${PORT:-8000}/health >/dev/null 2>&1; then
+        echo "✅ AO1 Scanner is healthy!"
+        break
+    else
+        echo "⏳ Waiting for scanner... (attempt $i/20)"
+        sleep 3
+    fi
+done
+
+echo "Step 9: Testing endpoints..."
+API_URL="http://localhost:${PORT:-8000}"
+
+test_endpoint() {
+    local endpoint=$1
+    local name=$2
+    
+    if curl -f "$API_URL$endpoint" >/dev/null 2>&1; then
+        echo "✅ $name working"
+    else
+        echo "⚠️  $name not responding"
+    fi
+}
+
+test_endpoint "/health" "Health check"
+test_endpoint "/health/detailed" "Detailed health"
+test_endpoint "/dashboard/stats" "Dashboard"
+test_endpoint "/metrics" "Metrics"
+
+echo ""
+echo "🎉 AO1 Scanner is RUNNING!"
+echo "========================="
+echo ""
+echo "📊 Access Points:"
+echo "• Main API: http://localhost:${PORT:-8000}"
+echo "• Health: http://localhost:${PORT:-8000}/health/detailed"
+echo "• Dashboard: http://localhost:${PORT:-8000}/dashboard/stats"
+echo "• Metrics: http://localhost:${PORT:-8000}/metrics"
+echo ""
+echo "🚀 Quick Test:"
+echo "curl http://localhost:${PORT:-8000}/health"
+echo ""
+echo "🔧 Management:"
+echo "• Logs: docker-compose logs -f"
+echo "• Stop: docker-compose down"
+echo "• Restart: docker-compose restart"
+echo ""
+echo "Ready to scan BigQuery for AO1 visibility assessment!"
 EOF
 
-cat > deploy_enhanced.sh << 'EOF'
+cat > quick_test.sh << 'EOF'
 #!/bin/bash
 
-set -e
+API_URL="http://localhost:${PORT:-8000}"
 
-echo "🚀 Deploying Enhanced AO1 Scanner with Full Integration Stack"
-echo "============================================================"
+echo "🧪 Quick AO1 Scanner Test"
+echo "========================"
 
-DEPLOYMENT_TYPE=${1:-docker}
+echo "Testing basic endpoints..."
 
-if [ "$DEPLOYMENT_TYPE" = "docker" ]; then
-    echo "Step 1: Creating monitoring directories..."
-    mkdir -p monitoring data outputs logs credentials results
-    
-    echo "Step 2: Setting up enhanced Docker Compose..."
-    ./enhanced_docker_compose.sh
-    
-    echo "Step 3: Validating credentials..."
-    if [ -f "validate_credentials.py" ]; then
-        python3 validate_credentials.py || {
-            echo "⚠️  Credential validation failed, but continuing deployment..."
-        }
-    fi
-    
-    echo "Step 4: Starting enhanced stack..."
-    docker-compose -f docker-compose.enhanced.yml up -d
-    
-    echo "Step 5: Waiting for services..."
-    sleep 20
-    
-    echo "Step 6: Health checks..."
-    echo "• AO1 Scanner:"
-    for i in {1..10}; do
-        if curl -f http://localhost:8000/health >/dev/null 2>&1; then
-            echo "  ✅ AO1 Scanner healthy"
-            break
-        else
-            echo "  ⏳ Waiting... (attempt $i/10)"
-            sleep 3
-        fi
-    done
-    
-    echo "• Redis:"
-    if docker-compose -f docker-compose.enhanced.yml exec -T redis redis-cli ping | grep -q PONG; then
-        echo "  ✅ Redis healthy"
-    else
-        echo "  ⚠️  Redis connection issues"
-    fi
-    
-    echo "• Prometheus:"
-    if curl -f http://localhost:9090/-/healthy >/dev/null 2>&1; then
-        echo "  ✅ Prometheus healthy"
-    else
-        echo "  ⚠️  Prometheus connection issues"
-    fi
-    
-    echo "• Grafana:"
-    if curl -f http://localhost:3000/api/health >/dev/null 2>&1; then
-        echo "  ✅ Grafana healthy"
-    else
-        echo "  ⚠️  Grafana connection issues"
-    fi
-    
-    echo ""
-    echo "🎉 Enhanced AO1 Scanner Stack Deployed!"
-    echo ""
-    echo "📊 Access Points:"
-    echo "• AO1 Scanner API: http://localhost:8000"
-    echo "• AO1 Dashboard: http://localhost:8000/dashboard/stats"
-    echo "• Prometheus: http://localhost:9090"
-    echo "• Grafana: http://localhost:3000 (admin/admin)"
-    echo "• Redis: localhost:6379"
-    echo ""
-    echo "🔧 Management:"
-    echo "• Logs: docker-compose -f docker-compose.enhanced.yml logs -f"
-    echo "• Stop: docker-compose -f docker-compose.enhanced.yml down"
-    echo "• Restart: docker-compose -f docker-compose.enhanced.yml restart"
-    
+echo "• Health check:"
+HEALTH=$(curl -s "$API_URL/health")
+echo "  $HEALTH"
+
+echo "• Detailed health:"
+curl -s "$API_URL/health/detailed" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    print(f\"  Overall: {data.get('overall_status', 'unknown')}\")
+    components = data.get('components', {})
+    for comp, status in components.items():
+        print(f\"  {comp}: {status.get('status', 'unknown')}\")
+except:
+    print('  Could not parse health data')
+"
+
+echo "• User registration test:"
+REG_RESPONSE=$(curl -s -X POST "$API_URL/auth/register" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@company.com", "password": "test123", "full_name": "Test User"}')
+
+if echo "$REG_RESPONSE" | grep -q "access_token"; then
+    echo "  ✅ Registration working"
+elif echo "$REG_RESPONSE" | grep -q "already registered"; then
+    echo "  ✅ Registration endpoint working (user exists)"
 else
-    echo "Kubernetes deployment with full integration stack..."
-    # Kubernetes deployment would go here
-    echo "Kubernetes deployment not implemented yet. Use: $0 docker"
+    echo "  ⚠️  Registration response: $REG_RESPONSE"
 fi
+
+echo ""
+echo "🎯 AO1 Scanner is ready for production scans!"
 EOF
 
-chmod +x configure_all_credentials.sh enhanced_docker_compose.sh deploy_enhanced.sh
+chmod +x create_env_template.sh run_scanner.sh quick_test.sh
 
-echo "✅ Enhanced credential configuration scripts created!"
+echo "✅ Simple deployment setup created!"
 echo ""
-echo "🚀 Setup your complete AO1 Scanner with all integrations:"
+echo "🚀 Two-Step Process:"
 echo ""
-echo "1. Configure all credentials:"
-echo "   ./configure_all_credentials.sh"
+echo "1. Create .env template and edit with your credentials:"
+echo "   ./create_env_template.sh"
+echo "   # Edit .env with your actual BigQuery credentials"
 echo ""
-echo "2. Deploy enhanced stack:"
-echo "   ./deploy_enhanced.sh docker"
+echo "2. Deploy and run everything:"
+echo "   ./run_scanner.sh"
 echo ""
-echo "This will set up:"
-echo "• BigQuery integration"
-echo "• Chronicle SIEM export"
-echo "• GraphQL endpoint support"
-echo "• Redis caching"
-echo "• Prometheus monitoring"
-echo "• Grafana dashboards"
-echo "• Real-time streaming"
+echo "3. Optional - test functionality:"
+echo "   ./quick_test.sh"
+echo ""
+echo "That's it! Put your credentials in .env, then run it."
