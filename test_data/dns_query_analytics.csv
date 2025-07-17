@@ -1,0 +1,7 @@
+query_timestamp,client_source,fqdn_requested,response_status,name_server,record_type,resolution_path
+2024-01-15T14:30:15.123Z,172.16.50.44,mail.corp.internal,NXDOMAIN,ns1.corp.internal,A,internal-recursive
+2024-01-15T14:30:16.456Z,192.168.200.150,github.com,NOERROR,8.8.8.8,AAAA,public-forwarder
+2024-01-15T14:30:17.789Z,10.244.1.55,kubernetes.default.svc.cluster.local,NOERROR,coredns.kube-system,A,cluster-internal
+2024-01-15T14:30:18.012Z,172.31.0.100,backup.s3.amazonaws.com,NOERROR,route53.amazonaws.com,CNAME,external-cloud
+2024-01-15T14:30:19.345Z,203.0.113.10,suspicious-domain.badactor.tld,REFUSED,security.filter.dns,A,threat-blocked
+2024-01-15T14:30:20.678Z,10.0.1.200,cdn.jquery.com,NOERROR,cloudflare.dns,CNAME,public-cdn

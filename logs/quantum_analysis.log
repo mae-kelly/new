@@ -1,0 +1,44 @@
+2025-07-16 18:06:53,655 - __main__ - INFO - Starting analysis in test mode
+2025-07-16 18:06:53,659 - root - INFO - Loaded test table: flow_correlation_events with 6 rows
+2025-07-16 18:06:53,660 - root - INFO - Loaded test table: enterprise_inventory_data with 6 rows
+2025-07-16 18:06:53,662 - root - INFO - Loaded test table: application_request_logs with 6 rows
+2025-07-16 18:06:53,663 - root - INFO - Loaded test table: dns_query_analytics with 6 rows
+2025-07-16 18:06:53,664 - root - INFO - Loaded test table: vulnerability_assessment_results with 6 rows
+2025-07-16 18:06:53,665 - root - INFO - Loaded test table: identity_access_audit with 6 rows
+2025-07-16 18:06:53,665 - root - INFO - Loaded test table: cloud_resource_inventory with 5 rows
+2025-07-16 18:06:53,666 - root - INFO - Loaded test table: endpoint_security_telemetry with 6 rows
+2025-07-16 18:06:53,668 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-07-16 18:06:53,668 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-07-16 18:07:12,531 - root - INFO - Analyzing table: flow_correlation_events
+2025-07-16 18:07:13,855 - root - INFO - Analyzing table: enterprise_inventory_data
+2025-07-16 18:07:15,346 - root - INFO - Analyzing table: application_request_logs
+2025-07-16 18:07:16,670 - root - INFO - Analyzing table: dns_query_analytics
+2025-07-16 18:07:17,794 - root - INFO - Analyzing table: vulnerability_assessment_results
+2025-07-16 18:07:18,833 - root - INFO - Analyzing table: identity_access_audit
+2025-07-16 18:07:19,909 - root - INFO - Analyzing table: cloud_resource_inventory
+2025-07-16 18:07:21,029 - root - INFO - Analyzing table: endpoint_security_telemetry
+2025-07-16 18:07:22,385 - __main__ - INFO - Analysis complete. Report saved to outputs/analysis_report.json
+2025-07-16 18:15:37,993 - INFO - Starting brilliant analysis in test mode
+2025-07-16 18:15:37,997 - INFO - Loaded test table: flow_correlation_events with 6 rows
+2025-07-16 18:15:37,998 - INFO - Loaded test table: enterprise_inventory_data with 6 rows
+2025-07-16 18:15:37,999 - INFO - Loaded test table: endpoint_security_telemetry with 6 rows
+2025-07-16 18:15:37,999 - INFO - Analyzing table: flow_correlation_events
+2025-07-16 18:15:38,065 - INFO - Analyzing table: enterprise_inventory_data
+2025-07-16 18:15:38,117 - INFO - Analyzing table: endpoint_security_telemetry
+2025-07-16 18:15:38,169 - INFO - Analysis complete. Report saved to outputs/analysis_report.json
+2025-07-16 18:30:12,849 - INFO - Starting brilliant analysis in test mode
+2025-07-16 18:30:12,857 - INFO - Loaded test table: flow_correlation_events with 6 rows
+2025-07-16 18:30:12,859 - INFO - Loaded test table: enterprise_inventory_data with 6 rows
+2025-07-16 18:30:12,861 - INFO - Loaded test table: endpoint_security_telemetry with 6 rows
+2025-07-16 18:30:12,861 - INFO - Analyzing table: flow_correlation_events
+2025-07-16 18:30:12,950 - INFO - Analyzing table: enterprise_inventory_data
+2025-07-16 18:30:13,008 - INFO - Analyzing table: endpoint_security_telemetry
+2025-07-16 18:30:13,072 - INFO - Analysis complete. Report saved to outputs/analysis_report.json
+2025-07-16 18:34:07,611 - INFO - Starting brilliant analysis in test mode
+2025-07-16 18:34:07,616 - INFO - Loaded test table: flow_correlation_events with 6 rows
+2025-07-16 18:34:07,616 - INFO - Loaded test table: enterprise_inventory_data with 6 rows
+2025-07-16 18:34:07,617 - INFO - Loaded test table: endpoint_security_telemetry with 6 rows
+2025-07-16 18:34:07,617 - INFO - Analyzing table: flow_correlation_events
+2025-07-16 18:34:07,661 - INFO - Analyzing table: enterprise_inventory_data
+2025-07-16 18:34:07,704 - INFO - Analyzing table: endpoint_security_telemetry
+2025-07-16 18:34:07,756 - INFO - Analysis complete. Report saved to outputs/analysis_report.json

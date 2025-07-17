@@ -1,0 +1,6 @@
+resource_arn,region_az,service_type,compute_spec,network_config,security_posture,billing_tags
+arn:aws:ec2:us-east-1:123456789012:instance/i-0abcd1234efgh5678,us-east-1a,web-application-tier,t3.large-2vcpu-8gb,vpc-web-dmz|sg-web-public,guardduty-enabled|nacl-restrictive,project:ecommerce|env:prod|owner:platform-team
+arn:aws:rds:us-west-2:123456789012:db:prod-mysql-cluster,us-west-2b,database-persistence,db.r5.xlarge-mysql-8.0,vpc-database-private|sg-db-internal,encryption-at-rest|backup-automated,project:analytics|env:prod|owner:data-team
+arn:aws:eks:eu-central-1:123456789012:cluster/k8s-production,eu-central-1c,container-orchestration,managed-k8s-1.27,vpc-container-isolated|sg-k8s-cluster,rbac-enabled|network-policies,project:microservices|env:prod|owner:devops-team
+arn:azure:vm:westeurope:rg-prod:vm-web-frontend-01,west-europe,frontend-load-balancer,Standard_D2s_v3-premium-ssd,vnet-frontend|nsg-web-tier,defender-enabled|jit-access,subscription:prod-workloads|rg:web-infrastructure|team:frontend-eng
+arn:gcp:compute:us-central1:project-12345:instance/gke-worker-optimized,us-central1-a,kubernetes-node-pool,n1-standard-4-container-optimized,vpc-gke-prod|firewall-gke-cluster,workload-identity|binary-authorization,project:microservices-gke|env:prod|cluster:gke-prod-central1

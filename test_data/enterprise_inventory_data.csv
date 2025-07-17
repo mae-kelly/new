@@ -1,0 +1,7 @@
+asset_reference,primary_fqdn,interface_config,platform_build,dept_assignment,facility_code,protection_agent
+REF-001947,mailsvr-exch-01.corp.local,eth0:172.20.1.50;mgmt:192.168.1.50,win2019-std-build-v4.2,corp-it-messaging,facility-nyc-dc1,mde-sensor-v2.1
+REF-002103,build-agent-07.dev.local,ens3:10.1.5.88;docker0:172.17.0.1,ubuntu-20.04-dev-template,software-eng-platform,cloud-aws-use1,qualys-agent-v4.8
+REF-002456,analytics-node-01.data.corp,bond0:172.31.5.100;backup:192.168.100.100,rhel8-db-optimized-v2.1,data-intelligence-team,dc-chicago-tier3,tanium-client-v7.6
+REF-002891,exec-laptop-pool-mgmt,wifi:192.168.50.0/24;vpn:10.200.0.0/24,macos-monterey-corp-image,executive-staff-support,distributed-mobile,s1-agent-v22.3
+REF-003245,orchestrator-master-03.k8s,cni:10.244.0.0/16;flannel:10.100.0.0/16,container-os-optimized-v2023,platform-reliability-eng,gcp-central1-zone-c,falco-sensor-v0.35
+REF-003672,perimeter-fw-01.ops.corp,mgmt:192.168.200.1;ext:203.0.113.1;int:10.0.0.1,cisco-asa-fw-9.18,network-sec-operations,colo-london-cage12,amp-connector-v1.8
