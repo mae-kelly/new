@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 from database import db, ScanJob, ScanResult, AuditLog
 from secure_scanner import SecureBigQueryScanner
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
