@@ -1,21 +1,31 @@
 #!/bin/bash
 
-cat > use_local_ssl_cert.sh << 'EOF'
+cat > configure_ssl_crt_key.sh << 'EOF'
 #!/bin/bash
 
-echo "🔐 Using Local SSL Certificate"
-echo "=============================="
+echo "🔐 Configuring SSL with CRT and KEY files"
+echo "========================================="
 
-# Check if ssl.cert exists
-if [ ! -f "ssl/ssl.cert" ]; then
-    echo "❌ SSL certificate not found at ssl/ssl.cert"
-    echo "Please ensure your certificate is at: ssl/ssl.cert"
+# Check for both certificate files
+if [ ! -f "ssl/"*.crt ]; then
+    echo "❌ No .crt file found in ssl/ folder"
+    ls -la ssl/
     exit 1
 fi
 
-echo "✅ Found SSL certificate at ssl/ssl.cert"
+if [ ! -f "ssl/"*.key ]; then
+    echo "❌ No .key file found in ssl/ folder"
+    ls -la ssl/
+    exit 1
+fi
 
-echo "Step 1: Creating Dockerfile with local SSL certificate..."
+CRT_FILE=$(find ssl/ -name "*.crt" | head -1)
+KEY_FILE=$(find ssl/ -name "*.key" | head -1)
+
+echo "✅ Found certificate: $CRT_FILE"
+echo "✅ Found key: $KEY_FILE"
+
+# Create Dockerfile that properly handles CRT and KEY
 cat > Dockerfile << 'DOCKERFILE'
 FROM python:3.11-slim
 
@@ -28,21 +38,26 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
+    openssl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy local SSL certificate
-COPY ssl/ssl.cert /usr/local/share/ca-certificates/ssl.crt
+# Copy SSL certificate and key
+COPY ssl/*.crt /usr/local/share/ca-certificates/
+COPY ssl/*.key /usr/local/share/ca-certificates/
 
-# Update certificate store with local certificate
+# Update certificate authorities
 RUN update-ca-certificates
 
 # Set certificate environment variables
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ENV SSL_CERT_DIR=/etc/ssl/certs
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
-# Copy and install requirements
+# Copy requirements first
 COPY requirements.txt .
+
+# Install Python packages with proper SSL
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
@@ -60,7 +75,7 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 CMD ["python", "run_server.py"]
 DOCKERFILE
 
-echo "Step 2: Creating docker-compose.yml with SSL certificate..."
+# Create docker-compose.yml with SSL configuration
 cat > docker-compose.yml << 'YAML'
 version: '3.8'
 
@@ -73,7 +88,9 @@ services:
       - DATABASE_PATH=/app/data/scanner.duckdb
       - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/bigquery-service-account.json
       - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+      - SSL_CERT_DIR=/etc/ssl/certs
       - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+      - CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
       - ENVIRONMENT=production
       - LOG_LEVEL=INFO
     env_file:
@@ -107,7 +124,7 @@ volumes:
   redis-data:
 YAML
 
-echo "Step 3: Creating .dockerignore to include SSL certificate..."
+# Update .dockerignore to include SSL files
 cat > .dockerignore << 'IGNORE'
 .git
 .gitignore
@@ -129,12 +146,13 @@ data
 node_modules
 .DS_Store
 
-# Keep SSL certificate
+# Include SSL certificate files
 !ssl/
-!ssl/ssl.cert
+!ssl/*.crt
+!ssl/*.key
 IGNORE
 
-echo "Step 4: Creating requirements.txt with SSL-compatible packages..."
+# Create requirements.txt with SSL-aware packages
 cat > requirements.txt << 'REQS'
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
@@ -149,39 +167,32 @@ structlog==23.2.0
 httpx==0.25.2
 redis==5.0.1
 certifi==2023.11.17
+urllib3==2.1.0
 REQS
 
-echo "✅ Docker configuration updated to use local SSL certificate"
+echo "✅ Configured Docker to use both CRT and KEY files"
+echo "Certificate: $CRT_FILE"
+echo "Key: $KEY_FILE"
 EOF
 
-cat > deploy_with_ssl_cert.sh << 'EOF'
+cat > deploy_with_crt_key.sh << 'EOF'
 #!/bin/bash
 
-echo "🚀 Deploy with Local SSL Certificate"
-echo "===================================="
+echo "🚀 Deploy with CRT and KEY files"
+echo "================================"
 
-# Check SSL certificate
-if [ ! -f "ssl/ssl.cert" ]; then
-    echo "❌ SSL certificate not found at ssl/ssl.cert"
-    echo "Please place your SSL certificate at: ssl/ssl.cert"
-    exit 1
-fi
+# Configure SSL
+./configure_ssl_crt_key.sh
 
-echo "✅ Using SSL certificate: ssl/ssl.cert"
-
-# Apply SSL configuration
-./use_local_ssl_cert.sh
-
-# Check .env
 if [ ! -f ".env" ]; then
-    echo "❌ .env file not found"
+    echo "❌ .env file needed"
     exit 1
 fi
 
 source .env
 
 if [ "$BIGQUERY_PROJECT_ID" = "your-project-id" ]; then
-    echo "❌ Edit .env with your BigQuery credentials"
+    echo "❌ Edit .env with BigQuery credentials"
     exit 1
 fi
 
@@ -203,24 +214,32 @@ cat > credentials/bigquery-service-account.json << JSON
 }
 JSON
 
-echo "Building with local SSL certificate..."
-docker-compose down 2>/dev/null || true
-docker-compose up --build -d
+echo "Stopping existing containers..."
+docker-compose down
 
-echo "Waiting for services..."
-sleep 15
+echo "Building with SSL certificate and key..."
+docker-compose build --no-cache
 
-echo "Testing SSL certificate configuration..."
+echo "Starting services..."
+docker-compose up -d
+
+echo "Waiting for services to start..."
+sleep 20
+
+echo "Testing SSL configuration..."
 if docker-compose exec -T ao1-scanner curl -s https://www.google.com >/dev/null 2>&1; then
-    echo "✅ SSL certificate working in container"
+    echo "✅ SSL certificate working properly"
 else
-    echo "⚠️ SSL certificate may need additional configuration"
+    echo "⚠️ SSL may need additional configuration"
+    echo "Checking certificate details..."
+    docker-compose exec -T ao1-scanner ls -la /etc/ssl/certs/ | grep -v lrwxrwxrwx | head -5
 fi
 
 echo "Testing AO1 Scanner..."
+PORT=${PORT:-8000}
 for i in {1..15}; do
-    if curl -f http://localhost:${PORT:-8000}/health >/dev/null 2>&1; then
-        echo "✅ AO1 Scanner is running with SSL certificate!"
+    if curl -f http://localhost:${PORT}/health >/dev/null 2>&1; then
+        echo "✅ AO1 Scanner running at http://localhost:${PORT}"
         break
     else
         echo "⏳ Waiting for scanner... (attempt $i/15)"
@@ -229,96 +248,86 @@ for i in {1..15}; do
 done
 
 echo ""
-echo "🎉 Deployment Complete with Local SSL Certificate!"
-echo "================================================="
-echo ""
-echo "📊 Access Points:"
-echo "• AO1 Scanner: http://localhost:${PORT:-8000}"
-echo "• Health Check: http://localhost:${PORT:-8000}/health"
-echo ""
-echo "🔐 SSL Certificate:"
-echo "• Loaded from: ssl/ssl.cert"
-echo "• Added to container certificate store"
-echo ""
-echo "🔧 Management:"
-echo "• Logs: docker-compose logs -f"
-echo "• Stop: docker-compose down"
+echo "🎉 Deployment complete with SSL certificate and key!"
+echo "📊 Access: http://localhost:${PORT}"
+echo "🔐 SSL files properly configured in container"
 EOF
 
-cat > verify_ssl_setup.sh << 'EOF'
+cat > verify_ssl_files.sh << 'EOF'
 #!/bin/bash
 
-echo "🔍 Verifying SSL Certificate Setup"
-echo "=================================="
+echo "🔍 Verifying SSL Certificate and Key Files"
+echo "=========================================="
 
-# Check local certificate
-if [ -f "ssl/ssl.cert" ]; then
-    echo "✅ SSL certificate found: ssl/ssl.cert"
-    
-    # Show certificate info
-    echo "Certificate details:"
-    openssl x509 -in ssl/ssl.cert -text -noout 2>/dev/null | grep -E "(Subject|Issuer|Not Before|Not After)" || echo "  (Certificate details not readable)"
+echo "Step 1: Checking local SSL files..."
+if ls ssl/*.crt >/dev/null 2>&1; then
+    for crt_file in ssl/*.crt; do
+        echo "✅ Certificate: $crt_file"
+        # Show certificate details
+        openssl x509 -in "$crt_file" -text -noout | grep -E "(Subject|Issuer|Not Before|Not After)" 2>/dev/null || echo "  (Certificate details not readable)"
+    done
 else
-    echo "❌ SSL certificate not found at ssl/ssl.cert"
+    echo "❌ No .crt files found in ssl/"
 fi
 
-# Check Docker configuration
-if [ -f "Dockerfile" ]; then
-    if grep -q "ssl.cert" Dockerfile; then
-        echo "✅ Dockerfile configured for SSL certificate"
-    else
-        echo "❌ Dockerfile not configured for SSL certificate"
-    fi
-fi
-
-# Check docker-compose configuration
-if [ -f "docker-compose.yml" ]; then
-    if grep -q "ssl:" docker-compose.yml; then
-        echo "✅ docker-compose.yml configured for SSL"
-    else
-        echo "❌ docker-compose.yml not configured for SSL"
-    fi
-fi
-
-# Test if container can access external HTTPS
-if docker-compose ps | grep -q "Up"; then
-    echo "Testing HTTPS connectivity from container..."
-    if docker-compose exec -T ao1-scanner curl -s --max-time 10 https://httpbin.org/get >/dev/null 2>&1; then
-        echo "✅ Container can access HTTPS with SSL certificate"
-    else
-        echo "⚠️ Container HTTPS access may have issues"
-    fi
+if ls ssl/*.key >/dev/null 2>&1; then
+    for key_file in ssl/*.key; do
+        echo "✅ Private key: $key_file"
+        # Verify key format
+        openssl rsa -in "$key_file" -check -noout 2>/dev/null && echo "  (Key format valid)" || echo "  (Key format may need checking)"
+    done
 else
-    echo "⚠️ Containers not running - start with docker-compose up -d"
+    echo "❌ No .key files found in ssl/"
 fi
 
 echo ""
-echo "SSL Setup Status:"
-if [ -f "ssl/ssl.cert" ] && [ -f "Dockerfile" ] && grep -q "ssl.cert" Dockerfile; then
-    echo "✅ SSL certificate properly configured"
-else
-    echo "❌ SSL certificate setup incomplete"
-    echo "Run: ./use_local_ssl_cert.sh"
+echo "Step 2: Checking certificate and key match..."
+if ls ssl/*.crt >/dev/null 2>&1 && ls ssl/*.key >/dev/null 2>&1; then
+    CRT_FILE=$(ls ssl/*.crt | head -1)
+    KEY_FILE=$(ls ssl/*.key | head -1)
+    
+    CRT_HASH=$(openssl x509 -noout -modulus -in "$CRT_FILE" 2>/dev/null | openssl md5)
+    KEY_HASH=$(openssl rsa -noout -modulus -in "$KEY_FILE" 2>/dev/null | openssl md5)
+    
+    if [ "$CRT_HASH" = "$KEY_HASH" ]; then
+        echo "✅ Certificate and key match"
+    else
+        echo "⚠️ Certificate and key may not match"
+    fi
 fi
+
+echo ""
+echo "Step 3: Checking if container is using certificates..."
+if docker-compose ps | grep -q "Up"; then
+    echo "Checking certificates in running container..."
+    docker-compose exec -T ao1-scanner ls -la /usr/local/share/ca-certificates/ 2>/dev/null || echo "Container not accessible"
+    
+    echo "Testing HTTPS from container..."
+    docker-compose exec -T ao1-scanner curl -s -o /dev/null -w "%{http_code}" https://www.google.com 2>/dev/null || echo "HTTPS test failed"
+else
+    echo "⚠️ Container not running"
+fi
+
+echo ""
+echo "🎯 SSL Status Summary:"
+echo "• CRT files: $(ls ssl/*.crt 2>/dev/null | wc -l | tr -d ' ')"
+echo "• KEY files: $(ls ssl/*.key 2>/dev/null | wc -l | tr -d ' ')"
+echo "• Docker configured: $([ -f "Dockerfile" ] && grep -q "ssl" Dockerfile && echo "Yes" || echo "No")"
 EOF
 
-chmod +x use_local_ssl_cert.sh deploy_with_ssl_cert.sh verify_ssl_setup.sh
+chmod +x configure_ssl_crt_key.sh deploy_with_crt_key.sh verify_ssl_files.sh
 
-echo "✅ Local SSL Certificate Setup Created!"
+echo "✅ SSL CRT and KEY configuration created!"
 echo ""
-echo "🔐 To use your SSL certificate at ssl/ssl.cert:"
+echo "🔐 To use your .crt and .key files:"
 echo ""
-echo "1. Configure Docker for your SSL certificate:"
-echo "   ./use_local_ssl_cert.sh"
+echo "1. Configure for CRT and KEY files:"
+echo "   ./configure_ssl_crt_key.sh"
 echo ""
-echo "2. Deploy with SSL certificate:"
-echo "   ./deploy_with_ssl_cert.sh"
+echo "2. Deploy with proper SSL:"
+echo "   ./deploy_with_crt_key.sh"
 echo ""
 echo "3. Verify SSL setup:"
-echo "   ./verify_ssl_setup.sh"
+echo "   ./verify_ssl_files.sh"
 echo ""
-echo "This will:"
-echo "• Copy ssl/ssl.cert into the Docker container"
-echo "• Add it to the container's certificate store"
-echo "• Configure all Python requests to use it"
-echo "• Mount ssl/ folder as read-only volume"
+echo "This will properly use both your certificate (.crt) and private key (.key) files"
