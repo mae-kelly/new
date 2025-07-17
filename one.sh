@@ -1,375 +1,95 @@
 #!/bin/bash
 set -e
 
-pip install asyncio aioredis fastapi uvicorn prometheus-client
+echo "Testing BigQuery connection..."
 
-cat > error_handling.py << 'EOF'
-import asyncio
-import time
-import logging
-from typing import Optional, Dict, Any, List
-from functools import wraps
-from dataclasses import dataclass
-from enum import Enum
-import json
-from contextlib import asynccontextmanager
-import signal
-import sys
+source .env
 
-class ErrorType(Enum):
-    BIGQUERY_ERROR = "bigquery_error"
-    NETWORK_ERROR = "network_error"
-    TIMEOUT_ERROR = "timeout_error"
-    PERMISSION_ERROR = "permission_error"
-    QUOTA_ERROR = "quota_error"
-    RATE_LIMIT_ERROR = "rate_limit_error"
-    GENERAL_ERROR = "general_error"
-
-@dataclass
-class ErrorContext:
-    error_type: ErrorType
-    message: str
-    retry_count: int
-    max_retries: int
-    backoff_seconds: float
-    context: Dict[str, Any]
-
-class CircuitBreaker:
-    def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 60):
-        self.failure_threshold = failure_threshold
-        self.recovery_timeout = recovery_timeout
-        self.failure_count = 0
-        self.last_failure_time = None
-        self.state = "CLOSED"
-        
-    def call(self, func):
-        if self.state == "OPEN":
-            if time.time() - self.last_failure_time > self.recovery_timeout:
-                self.state = "HALF_OPEN"
-            else:
-                raise Exception("Circuit breaker is OPEN")
-        
-        try:
-            result = func()
-            if self.state == "HALF_OPEN":
-                self.state = "CLOSED"
-                self.failure_count = 0
-            return result
-        except Exception as e:
-            self.failure_count += 1
-            self.last_failure_time = time.time()
-            if self.failure_count >= self.failure_threshold:
-                self.state = "OPEN"
-            raise e
-
-def retry_with_backoff(max_retries: int = 3, base_delay: float = 1.0, max_delay: float = 60.0):
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            for attempt in range(max_retries + 1):
-                try:
-                    return await func(*args, **kwargs)
-                except Exception as e:
-                    if attempt == max_retries:
-                        raise e
-                    
-                    error_type = classify_error(e)
-                    if error_type in [ErrorType.PERMISSION_ERROR, ErrorType.QUOTA_ERROR]:
-                        raise e
-                    
-                    delay = min(base_delay * (2 ** attempt), max_delay)
-                    await asyncio.sleep(delay)
-                    
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
-
-def classify_error(error: Exception) -> ErrorType:
-    error_str = str(error).lower()
-    
-    if "permission" in error_str or "forbidden" in error_str:
-        return ErrorType.PERMISSION_ERROR
-    elif "quota" in error_str or "rate limit" in error_str:
-        return ErrorType.QUOTA_ERROR
-    elif "timeout" in error_str:
-        return ErrorType.TIMEOUT_ERROR
-    elif "network" in error_str or "connection" in error_str:
-        return ErrorType.NETWORK_ERROR
-    elif "bigquery" in error_str:
-        return ErrorType.BIGQUERY_ERROR
-    else:
-        return ErrorType.GENERAL_ERROR
-
-class ErrorHandler:
-    def __init__(self):
-        self.circuit_breakers = {}
-        
-    def get_circuit_breaker(self, key: str) -> CircuitBreaker:
-        if key not in self.circuit_breakers:
-            self.circuit_breakers[key] = CircuitBreaker()
-        return self.circuit_breakers[key]
-    
-    async def handle_error(self, error: Exception, context: Dict[str, Any]):
-        error_type = classify_error(error)
-        
-        error_data = {
-            "error_type": error_type.value,
-            "message": str(error),
-            "context": context,
-            "timestamp": time.time()
-        }
-        
-        logging.error(f"Error handled: {error_type.value}", extra=error_data)
-        
-        if error_type == ErrorType.QUOTA_ERROR:
-            await self.handle_quota_error(error, context)
-        elif error_type == ErrorType.PERMISSION_ERROR:
-            await self.handle_permission_error(error, context)
-        elif error_type == ErrorType.RATE_LIMIT_ERROR:
-            await self.handle_rate_limit_error(error, context)
-
-    async def handle_quota_error(self, error: Exception, context: Dict[str, Any]):
-        await asyncio.sleep(300)
-        
-    async def handle_permission_error(self, error: Exception, context: Dict[str, Any]):
-        raise error
-        
-    async def handle_rate_limit_error(self, error: Exception, context: Dict[str, Any]):
-        await asyncio.sleep(60)
-
-class GracefulShutdown:
-    def __init__(self):
-        self.shutdown_event = asyncio.Event()
-        self.tasks = []
-        
-    def register_task(self, task):
-        self.tasks.append(task)
-        
-    async def shutdown(self):
-        logging.info("Graceful shutdown initiated")
-        self.shutdown_event.set()
-        
-        for task in self.tasks:
-            if not task.done():
-                task.cancel()
-                
-        await asyncio.gather(*self.tasks, return_exceptions=True)
-        logging.info("Graceful shutdown complete")
-
-shutdown_handler = GracefulShutdown()
-
-def signal_handler(signum, frame):
-    logging.info(f"Received signal {signum}")
-    asyncio.create_task(shutdown_handler.shutdown())
-
-signal.signal(signal.SIGTERM, signal_handler)
-signal.signal(signal.SIGINT, signal_handler)
-
-@asynccontextmanager
-async def timeout_context(seconds: int):
-    try:
-        await asyncio.wait_for(asyncio.sleep(0), timeout=seconds)
-        yield
-    except asyncio.TimeoutError:
-        raise TimeoutError(f"Operation timed out after {seconds} seconds")
-
-async def health_check() -> bool:
-    try:
-        return True
-    except Exception:
-        return False
-
-async def ready_check() -> bool:
-    try:
-        return True
-    except Exception:
-        return False
-EOF
-
-cat > production_main.py << 'EOF'
-import asyncio
-import logging
-import json
+cat > test_bigquery.py << 'EOF'
 import os
-from typing import Dict, Any
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
-from error_handling import ErrorHandler, retry_with_backoff, timeout_context, shutdown_handler
-from neural_engine_brilliant import BrilliantVisibilityMapper
-import pandas as pd
-from prometheus_client import Counter, Histogram, generate_latest
-from fastapi.responses import Response
+from google.cloud import bigquery
+from google.cloud import resourcemanager_v3
 
-app = FastAPI(title="Production ML Scanner")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-error_handler = None
-
-REQUEST_COUNT = Counter('requests_total', 'Total requests', ['method', 'endpoint', 'status'])
-REQUEST_DURATION = Histogram('request_duration_seconds', 'Request duration')
-
-@app.on_event("startup")
-async def startup_event():
-    global error_handler
-    
-    error_handler = ErrorHandler()
-    
-    logging.basicConfig(level=logging.INFO)
-    logging.info("Application started")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    await shutdown_handler.shutdown()
-
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
-
-@app.get("/ready")
-async def ready_check():
-    return {"status": "ready"}
-
-@app.get("/metrics")
-async def metrics():
-    return Response(generate_latest(), media_type="text/plain")
-
-@retry_with_backoff(max_retries=3)
-async def scan_mock_data():
+def test_connection():
     try:
-        async with timeout_context(30):
-            mock_tables = {
-                'test_table': pd.DataFrame({
-                    'hostname': ['srv-web-01', 'db-prod-mysql'],
-                    'ip_address': ['192.168.1.100', '10.0.0.1'],
-                    'department': ['engineering', 'finance']
-                })
-            }
-            
-            mapper = BrilliantVisibilityMapper()
-            mappings = mapper.discover_mappings_with_brilliance(mock_tables)
-            
-            return mappings
-            
-    except Exception as e:
-        await error_handler.handle_error(e, {"operation": "scan_mock_data"})
-        raise
-
-@app.post("/scan")
-async def scan_endpoint():
-    try:
-        REQUEST_COUNT.labels(method="POST", endpoint="/scan", status="success").inc()
+        bq_client = bigquery.Client()
+        resource_client = resourcemanager_v3.ProjectsClient()
         
-        with REQUEST_DURATION.time():
-            mappings = await scan_mock_data()
-            
-            result = {
-                "mappings": [
-                    {
-                        "source": m.source_coordinates,
-                        "metric": m.target_metric,
-                        "confidence": float(m.entanglement_strength),
-                        "table": m.table_name,
-                        "column": m.column_name
-                    }
-                    for m in mappings
-                ],
-                "total_mappings": len(mappings)
-            }
-            
-            return result
-            
+        request = resourcemanager_v3.ListProjectsRequest()
+        projects = list(resource_client.list_projects(request=request))
+        active_projects = [p for p in projects if p.state == resourcemanager_v3.Project.State.ACTIVE]
+        
+        print(f"✅ Found {len(active_projects)} active projects:")
+        for i, project in enumerate(active_projects[:5]):
+            print(f"   {i+1}. {project.project_id}")
+        
+        if len(active_projects) > 5:
+            print(f"   ... and {len(active_projects)-5} more")
+        
+        if len(active_projects) > 0:
+            test_project = active_projects[0]
+            datasets = list(bq_client.list_datasets(test_project.project_id))
+            print(f"✅ Found {len(datasets)} datasets in {test_project.project_id}")
+        
+        print("✅ BigQuery connection successful!")
+        return True
+        
     except Exception as e:
-        REQUEST_COUNT.labels(method="POST", endpoint="/scan", status="error").inc()
-        await error_handler.handle_error(e, {"endpoint": "/scan"})
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"❌ Connection failed: {e}")
+        return False
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    test_connection()
 EOF
 
-cat > test_error_handling.py << 'EOF'
-import asyncio
-import pytest
-from error_handling import ErrorHandler, retry_with_backoff, CircuitBreaker, classify_error, ErrorType
+python test_bigquery.py
 
-@pytest.mark.asyncio
-async def test_retry_with_backoff():
-    attempts = 0
-    
-    @retry_with_backoff(max_retries=2)
-    async def failing_function():
-        nonlocal attempts
-        attempts += 1
-        if attempts < 3:
-            raise Exception("Temporary failure")
-        return "success"
-    
-    result = await failing_function()
-    assert result == "success"
-    assert attempts == 3
+if [ $? -eq 0 ]; then
+    echo "Ready to scan BigQuery projects"
+else
+    echo "Fix connection before proceeding"
+    exit 1
+fi
 
-def test_circuit_breaker():
-    cb = CircuitBreaker(failure_threshold=2, recovery_timeout=1)
-    
-    def failing_function():
-        raise Exception("Always fails")
-    
-    with pytest.raises(Exception):
-        cb.call(failing_function)
-    
-    with pytest.raises(Exception):
-        cb.call(failing_function)
-    
-    assert cb.state == "OPEN"
-    
-    with pytest.raises(Exception, match="Circuit breaker is OPEN"):
-        cb.call(failing_function)
+#!/bin/bash
+set -e
 
-def test_error_classification():
-    assert classify_error(Exception("Permission denied")) == ErrorType.PERMISSION_ERROR
-    assert classify_error(Exception("Quota exceeded")) == ErrorType.QUOTA_ERROR
-    assert classify_error(Exception("Connection timeout")) == ErrorType.TIMEOUT_ERROR
-    assert classify_error(Exception("Network error")) == ErrorType.NETWORK_ERROR
-    assert classify_error(Exception("BigQuery error")) == ErrorType.BIGQUERY_ERROR
-    assert classify_error(Exception("Unknown error")) == ErrorType.GENERAL_ERROR
+echo "Starting BigQuery multi-project scanner..."
 
-if __name__ == "__main__":
-    pytest.main([__file__])
-EOF
+source .env
 
-echo "Testing error handling..."
-python -m pytest test_error_handling.py -v
-
-echo "Starting production server with error handling..."
-python production_main.py &
-PID=$!
-
-sleep 5
-
-echo "Testing endpoints..."
-curl -s http://localhost:8000/health
+echo "This will scan ALL accessible BigQuery projects for visibility data"
+echo "Including hosts, networks, security systems, platforms, locations, etc."
 echo ""
-curl -s http://localhost:8000/ready
-echo ""
-curl -s -X POST http://localhost:8000/scan | jq .
+read -p "Continue? (y/N): " -n 1 -r
 echo ""
 
-echo "Stopping server..."
-kill $PID
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Cancelled"
+    exit 0
+fi
 
-echo "Error handling implemented successfully!"
-echo "Features added:"
-echo "  - Retry with exponential backoff"
-echo "  - Circuit breaker pattern"
-echo "  - Error classification"
-echo "  - Graceful shutdown"
-echo "  - Timeout handling"
-echo "  - Prometheus metrics"
+echo "🚀 Starting scan across all projects..."
+echo "This may take several minutes..."
+echo ""
+
+python bigquery_existing_ml.py
+
+echo ""
+echo "🎉 Scan completed!"
+echo "📁 Results saved to: outputs/bigquery_existing_ml_scan.json"
+
+if [ -f "outputs/bigquery_existing_ml_scan.json" ]; then
+    echo ""
+    echo "📊 Quick summary:"
+    python -c "
+import json
+with open('outputs/bigquery_existing_ml_scan.json', 'r') as f:
+    data = json.load(f)
+meta = data.get('scan_metadata', {})
+print(f'Projects scanned: {meta.get(\"projects_scanned\", 0)}')
+print(f'Tables scanned: {meta.get(\"tables_scanned\", 0)}') 
+print(f'Total mappings found: {meta.get(\"total_mappings\", 0)}')
+print(f'High confidence: {meta.get(\"high_confidence_mappings\", 0)}')
+"
+fi

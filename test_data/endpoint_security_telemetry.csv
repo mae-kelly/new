@@ -1,7 +1,0 @@
-sensor_id,machine_identity,os_build,process_tree,file_hashes,registry_changes,agent_status
-UUID-A7B9C3D1,CORP-LAPTOP-0447,Darwin-21.6.0-arm64,launchd|chrome.exe|child-processes,sha256:4a5b6c7d8e9f1234,/Library/Preferences/com.apple,defender-online-v4.18
-UUID-B8C2E4F5,WEB-FARM-02,Linux-5.4.0-ubuntu-x86_64,systemd|nginx|worker-pool,md5:1a2b3c4d5e6f7890,/etc/systemd/system/nginx,crowdstrike-falcon-6.45
-UUID-C9D3F6A8,DB-PROD-01,Windows-NT-10.0.17763-x64,services.exe|sqlservr.exe|threads,sha1:9f8e7d6c5b4a3210,HKLM\System\SQL\Security,tanium-client-7.4.6
-UUID-D4E7G9B2,K8S-WORKER-05,Container-Linux-CoreOS-2023.4.0,containerd|kubelet|pod-sandbox,sha256:f1e2d3c4b5a67890,/var/lib/kubelet/config.yaml,falco-agent-0.35.1
-UUID-E5F8H3C6,MOBILE-MGMT-99,iOS-16.7.2-arm64,kernel_task|SpringBoard|MobileMail,sha256:7g8h9i1j2k3l4567,/System/Library/Frameworks,jamf-protect-2.8.1
-UUID-F6G9I4D7,FW-PERIMETER-01,Cisco-IOS-15.1-M12a,init|iosprocess|snmp,md5:m4n5o6p7q8r90123,running-config|startup-config,cisco-amp-1.2.3

@@ -1,7 +1,0 @@
-event_uuid,origin_addr,destination_addr,transport_proto,session_bytes,correlation_metadata,collection_source
-FLOW_8847291,172.16.47.192:49152,crm-db01.internal.corp:3306,TCP_STREAM,2048576,database_query_session,netflow_collector_v9
-FLOW_8847292,10.244.5.23:6443,172.31.0.55:3306,TCP_DATA,512000,k8s_api_to_mysql,envoy_telemetry
-FLOW_8847293,192.168.100.45:443,203.0.113.50:80,HTTP_GET,1024000,web_content_request,panos_traffic_log
-FLOW_8847294,172.16.0.0/12,backup-partner.external.net:22,SFTP_BULK,4194304,offsite_backup_transfer,cp_fw_logs
-FLOW_8847295,mobile-pool.corp:993,exchange01.mail.corp:993,IMAPS_SYNC,65536,mobile_email_sync,zscaler_proxy
-FLOW_8847296,jenkins.build.corp:8080,nexus.artifacts.corp:443,HTTPS_PUT,8388608,artifact_deployment,bigip_analytics

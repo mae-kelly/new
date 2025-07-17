@@ -1,7 +1,0 @@
-session_identifier,service_name,uri_pattern,response_metrics,backend_dependencies,monitoring_signals
-SESS-AUTH-9944721,identity-svc.cluster.local,/oauth2/token,200_45ms,user-directory:389|session-cache:6379,jaeger-enabled
-SESS-API-9944722,api-gateway.prod.internal,/api/v2/users/{id}/profile,201_120ms,postgres-primary:5432|audit-stream:9092,prometheus-scraped
-SESS-WEB-9944723,frontend-app.dmz.corp,/dashboard/analytics/reports,200_2100ms,backend-api:8080|static-cdn:443,datadog-instrumented
-SESS-DATA-9944724,stream-processor.pipeline.local,/webhook/events/process,202_15ms,message-queue:5672|object-storage:443,elastic-apm-enabled
-SESS-FILE-9944725,document-service.mgmt.svc,/documents/upload/bulk,413_timeout,virus-scanner:8081|search-index:9200,splunk-forwarded
-SESS-SYNC-9944726,db-replication.cluster.internal,/sync/incremental/delta,200_3400ms,master-db:3306|replica-db:3307,grafana-linked

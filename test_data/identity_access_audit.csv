@@ -1,7 +1,0 @@
-auth_event_id,user_principal,resource_path,access_result,risk_indicators,auth_method,session_details
-AUTH-EVT-445821,john.doe@corp.internal,/sharepoint/sites/finance/documents,ALLOW,geo-consistent|device-trusted,saml-sso-okta,chrome-windows-managed
-AUTH-EVT-445822,svc.backup.automation@service.local,/api/database/export/full,DENY,unusual-time|privileged-account,api-key-expired,service-account-automated
-AUTH-EVT-445823,sarah.wilson@admin.corp.internal,/infrastructure/firewall/config,ALLOW,mfa-token|admin-verified,smartcard-piv,secure-admin-workstation
-AUTH-EVT-445824,external.contractor@partner.vendor.com,/projects/shared/development,CONDITIONAL,external-domain|verification-required,oauth2-azure-b2b,vpn-established
-AUTH-EVT-445825,service.monitoring@observability.internal,/metrics/prometheus/scrape,ALLOW,service-mesh-verified|internal-network,mutual-tls-cert,k8s-service-account
-AUTH-EVT-445826,guest.user.temp@visitors.corp.internal,/portal/public/resources,ALLOW,guest-isolated|time-limited,temp-password,restricted-vlan
