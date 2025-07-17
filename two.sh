@@ -1,114 +1,271 @@
 #!/bin/bash
 
-cat > create_env_template.sh << 'EOF'
+cat > fix_build_issues.sh << 'EOF'
 #!/bin/bash
 
-echo "📝 Creating .env template with all credential fields..."
+echo "🔧 Fixing Docker build and Python dependency issues..."
 
-cat > .env << 'ENV'
-# Core Configuration
-DATABASE_PATH=scanner.duckdb
-JWT_SECRET_KEY=auto-generated-on-deploy
-PORT=8000
-HOST=0.0.0.0
-ENVIRONMENT=production
-LOG_LEVEL=INFO
+echo "Step 1: Creating fixed requirements.txt..."
+cat > requirements.txt << 'REQS'
+# Core web framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
 
-# BigQuery Credentials - EDIT THESE WITH YOUR ACTUAL VALUES
-BIGQUERY_TYPE=service_account
-BIGQUERY_PROJECT_ID=your-project-id
-BIGQUERY_PRIVATE_KEY_ID=your-private-key-id
-BIGQUERY_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nyour-private-key-here\n-----END PRIVATE KEY-----"
-BIGQUERY_CLIENT_EMAIL=scanner@your-project.iam.gserviceaccount.com
-BIGQUERY_CLIENT_ID=your-client-id
-BIGQUERY_AUTH_URI=https://accounts.google.com/o/oauth2/auth
-BIGQUERY_TOKEN_URI=https://oauth2.googleapis.com/token
-BIGQUERY_AUTH_PROVIDER_X509_CERT_URL=https://www.googleapis.com/oauth2/v1/certs
-BIGQUERY_CLIENT_X509_CERT_URL=https://www.googleapis.com/robot/v1/metadata/x509/scanner%40your-project.iam.gserviceaccount.com
+# Google Cloud dependencies
+google-cloud-bigquery==3.12.0
+google-cloud-resource-manager==1.10.4
+google-auth==2.23.4
 
-# Chronicle SIEM Integration - OPTIONAL
-CHRONICLE_API_KEY=your-chronicle-api-key
-CHRONICLE_SECRET_KEY=your-chronicle-secret-key
-CHRONICLE_FEED_ID=your-chronicle-feed-id
-CHRONICLE_ENDPOINT=https://backstory.googleapis.com
+# Authentication and security
+PyJWT==2.8.0
+bcrypt==4.1.1
 
-# GraphQL Integration - OPTIONAL  
-GRAPHQL_ENDPOINT=https://your-graphql-endpoint.com/graphql
-GRAPHQL_API_KEY=your-graphql-api-key
+# Database
+duckdb==0.9.2
 
-# Feature Flags
-ENABLE_SIEM_INTEGRATION=true
-ENABLE_GRAPHQL_QUERIES=true
-ENABLE_REAL_TIME_STREAMING=true
-ENABLE_INDUSTRY_DETECTION=true
+# Data validation
+pydantic[email]==2.5.0
 
-# Performance Settings
-MAX_PROJECTS_PER_SCAN=50
-MAX_TABLES_PER_PROJECT=200
-SCAN_TIMEOUT_MINUTES=60
-MAX_CONCURRENT_SCANS=8
-ENV
+# Configuration
+python-dotenv==1.0.0
 
-echo "✅ Created .env template"
-echo ""
-echo "📋 EDIT .env NOW with your actual credentials:"
-echo ""
-echo "Required (BigQuery):"
-echo "• BIGQUERY_PROJECT_ID"
-echo "• BIGQUERY_PRIVATE_KEY (full key with BEGIN/END lines)"
-echo "• BIGQUERY_CLIENT_EMAIL" 
-echo "• BIGQUERY_CLIENT_ID"
-echo "• BIGQUERY_PRIVATE_KEY_ID"
-echo ""
-echo "Optional (Chronicle):"
-echo "• CHRONICLE_API_KEY"
-echo "• CHRONICLE_SECRET_KEY"
-echo "• CHRONICLE_FEED_ID"
-echo ""
-echo "Optional (GraphQL):"
-echo "• GRAPHQL_ENDPOINT"
-echo "• GRAPHQL_API_KEY"
-echo ""
-echo "When done editing, run: ./run_scanner.sh"
-EOF
+# Logging
+structlog==23.2.0
 
-cat > run_scanner.sh << 'EOF'
+# HTTP client
+httpx==0.25.2
+
+# Data processing
+pandas>=2.1.0,<2.3.0
+numpy>=1.25.0,<2.0.0
+
+# Additional dependencies for enhanced features
+redis>=5.0.0
+prometheus-client>=0.19.0
+psutil>=5.9.0
+requests>=2.31.0
+
+# Development tools (optional)
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+REQS
+
+echo "✅ Fixed requirements.txt created"
+
+echo "Step 2: Creating optimized Dockerfile..."
+cat > Dockerfile.fixed << 'DOCKERFILE'
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip and setuptools
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+
+# Install Python dependencies with verbose output for debugging
+RUN pip install --no-cache-dir -r requirements.txt --verbose
+
+# Copy application code
+COPY . .
+
+# Create necessary directories
+RUN mkdir -p /app/data /app/outputs /app/logs /app/credentials /app/results
+
+# Create non-root user
+RUN groupadd -r scanner && useradd -r -g scanner scanner
+RUN chown -R scanner:scanner /app
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Expose port
+EXPOSE 8000
+
+# Switch to non-root user
+USER scanner
+
+# Start application
+CMD ["python", "run_server.py"]
+DOCKERFILE
+
+echo "✅ Optimized Dockerfile created"
+
+echo "Step 3: Creating simplified Docker Compose..."
+cat > docker-compose.simple.yml << 'YAML'
+version: '3.8'
+
+services:
+  ao1-scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile.fixed
+    ports:
+      - "${PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/bigquery-service-account.json
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+      - ./logs:/app/logs
+      - ./credentials:/app/credentials
+      - ./results:/app/results
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+YAML
+
+echo "✅ Simplified Docker Compose created"
+
+echo "Step 4: Creating build troubleshooting script..."
+cat > debug_build.sh << 'SCRIPT'
 #!/bin/bash
 
-set -e
+echo "🔍 Docker Build Debug Information"
+echo "================================"
 
-echo "🚀 AO1 Scanner - Deploy and Run"
-echo "==============================="
+echo "Docker version:"
+docker --version
+
+echo ""
+echo "Python version in container:"
+docker run --rm python:3.11-slim python --version
+
+echo ""
+echo "Available disk space:"
+df -h
+
+echo ""
+echo "Docker system info:"
+docker system df
+
+echo ""
+echo "Cleaning up old builds..."
+docker system prune -f
+
+echo ""
+echo "Building with verbose output..."
+docker build -f Dockerfile.fixed -t ao1-scanner:debug . --no-cache --progress=plain
+
+echo ""
+echo "Testing container startup..."
+docker run --rm -d --name ao1-test ao1-scanner:debug
+
+sleep 10
+
+echo "Container logs:"
+docker logs ao1-test
+
+echo "Stopping test container..."
+docker stop ao1-test
+
+echo "✅ Debug build complete"
+SCRIPT
+
+chmod +x debug_build.sh
+
+echo "✅ Build troubleshooting script created"
+
+echo "Step 5: Creating alternative lightweight build..."
+cat > Dockerfile.lightweight << 'DOCKERFILE'
+FROM python:3.11-alpine
+
+# Install system dependencies
+RUN apk add --no-cache \
+    gcc \
+    musl-dev \
+    curl \
+    postgresql-dev
+
+WORKDIR /app
+
+# Install core dependencies only
+RUN pip install --no-cache-dir \
+    fastapi==0.104.1 \
+    uvicorn==0.24.0 \
+    google-cloud-bigquery==3.12.0 \
+    google-auth==2.23.4 \
+    pydantic[email]==2.5.0 \
+    python-dotenv==1.0.0 \
+    duckdb==0.9.2 \
+    PyJWT==2.8.0 \
+    bcrypt==4.1.1
+
+# Copy application
+COPY . .
+
+# Create directories
+RUN mkdir -p data outputs logs credentials results
+
+EXPOSE 8000
+
+CMD ["python", "run_server.py"]
+DOCKERFILE
+
+echo "✅ Lightweight Alpine Dockerfile created"
+
+echo "Step 6: Creating no-build option..."
+cat > run_without_docker.sh << 'SCRIPT'
+#!/bin/bash
+
+echo "🏃 Running AO1 Scanner without Docker"
+echo "====================================="
 
 if [ ! -f ".env" ]; then
-    echo "❌ .env file not found!"
-    echo "Run: ./create_env_template.sh first"
+    echo "❌ .env file not found. Run ./create_env_template.sh first"
     exit 1
 fi
 
-echo "Step 1: Loading environment..."
+echo "Step 1: Setting up Python virtual environment..."
+python3 -m venv venv
+source venv/bin/activate
+
+echo "Step 2: Installing dependencies..."
+pip install --upgrade pip
+pip install -r requirements.txt
+
+echo "Step 3: Loading environment..."
 source .env
 
-if [ "$BIGQUERY_PROJECT_ID" = "your-project-id" ]; then
-    echo "❌ Please edit .env with your actual BigQuery credentials first"
-    echo "Required fields: BIGQUERY_PROJECT_ID, BIGQUERY_CLIENT_EMAIL, BIGQUERY_PRIVATE_KEY"
-    exit 1
-fi
-
-echo "✅ Environment loaded"
-
-echo "Step 2: Generating JWT secret if needed..."
-if [ "$JWT_SECRET_KEY" = "auto-generated-on-deploy" ]; then
-    JWT_SECRET=$(openssl rand -hex 32 2>/dev/null || python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null || echo "fallback_$(date +%s)")
-    if [ "$(uname)" = "Darwin" ]; then
-        sed -i '' "s/JWT_SECRET_KEY=auto-generated-on-deploy/JWT_SECRET_KEY=$JWT_SECRET/" .env
-    else
-        sed -i "s/JWT_SECRET_KEY=auto-generated-on-deploy/JWT_SECRET_KEY=$JWT_SECRET/" .env
-    fi
-    echo "✅ JWT secret generated"
-fi
-
-echo "Step 3: Creating BigQuery service account JSON..."
+echo "Step 4: Creating BigQuery credentials..."
 mkdir -p credentials
 
 cat > credentials/bigquery-service-account.json << JSON
@@ -126,218 +283,158 @@ cat > credentials/bigquery-service-account.json << JSON
 }
 JSON
 
-echo "✅ BigQuery credentials configured"
-
-echo "Step 4: Testing BigQuery connection..."
 export GOOGLE_APPLICATION_CREDENTIALS=credentials/bigquery-service-account.json
 
-python3 << PYTHON
-import os
+echo "Step 5: Testing BigQuery connection..."
+python3 -c "
+from google.cloud import bigquery
+from google.auth import default
 try:
-    from google.cloud import bigquery
-    from google.auth import default
-    
     credentials, project = default()
     client = bigquery.Client(credentials=credentials, project=project)
-    
-    query = "SELECT 1 as test"
+    query = 'SELECT 1 as test'
     job = client.query(query)
     list(job.result())
-    
-    print("✅ BigQuery connection successful")
-    
+    print('✅ BigQuery connection successful')
 except Exception as e:
-    print(f"❌ BigQuery connection failed: {e}")
-    print("Check your credentials in .env")
+    print(f'❌ BigQuery connection failed: {e}')
     exit(1)
-PYTHON
-
-echo "Step 5: Creating Docker Compose..."
-mkdir -p data outputs logs results monitoring
-
-cat > docker-compose.yml << 'YAML'
-version: '3.8'
-
-services:
-  ao1-scanner:
-    build:
-      context: .
-      dockerfile: Dockerfile.prod
-    ports:
-      - "${PORT:-8000}:8000"
-    env_file:
-      - .env
-    environment:
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/bigquery-service-account.json
-    volumes:
-      - ./data:/app/data
-      - ./outputs:/app/outputs
-      - ./logs:/app/logs
-      - ./credentials:/app/credentials
-      - ./results:/app/results
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-    depends_on:
-      - redis
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    restart: unless-stopped
-
-volumes:
-  redis-data:
-YAML
-
-if [ ! -f "Dockerfile.prod" ]; then
-    echo "Creating Dockerfile..."
-    cat > Dockerfile.prod << 'DOCKERFILE'
-FROM python:3.11-slim
-
-WORKDIR /app
-
-RUN apt-get update && apt-get install -y gcc curl && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-RUN mkdir -p /app/data /app/outputs /app/logs /app/credentials /app/results
-
-EXPOSE 8000
-
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-  CMD curl -f http://localhost:8000/health || exit 1
-
-CMD ["python", "run_server.py"]
-DOCKERFILE
-fi
-
-echo "✅ Docker configuration ready"
-
-echo "Step 6: Building and starting services..."
-docker-compose up --build -d
-
-echo "Step 7: Waiting for services..."
-sleep 15
-
-echo "Step 8: Health check..."
-for i in {1..20}; do
-    if curl -f http://localhost:${PORT:-8000}/health >/dev/null 2>&1; then
-        echo "✅ AO1 Scanner is healthy!"
-        break
-    else
-        echo "⏳ Waiting for scanner... (attempt $i/20)"
-        sleep 3
-    fi
-done
-
-echo "Step 9: Testing endpoints..."
-API_URL="http://localhost:${PORT:-8000}"
-
-test_endpoint() {
-    local endpoint=$1
-    local name=$2
-    
-    if curl -f "$API_URL$endpoint" >/dev/null 2>&1; then
-        echo "✅ $name working"
-    else
-        echo "⚠️  $name not responding"
-    fi
-}
-
-test_endpoint "/health" "Health check"
-test_endpoint "/health/detailed" "Detailed health"
-test_endpoint "/dashboard/stats" "Dashboard"
-test_endpoint "/metrics" "Metrics"
-
-echo ""
-echo "🎉 AO1 Scanner is RUNNING!"
-echo "========================="
-echo ""
-echo "📊 Access Points:"
-echo "• Main API: http://localhost:${PORT:-8000}"
-echo "• Health: http://localhost:${PORT:-8000}/health/detailed"
-echo "• Dashboard: http://localhost:${PORT:-8000}/dashboard/stats"
-echo "• Metrics: http://localhost:${PORT:-8000}/metrics"
-echo ""
-echo "🚀 Quick Test:"
-echo "curl http://localhost:${PORT:-8000}/health"
-echo ""
-echo "🔧 Management:"
-echo "• Logs: docker-compose logs -f"
-echo "• Stop: docker-compose down"
-echo "• Restart: docker-compose restart"
-echo ""
-echo "Ready to scan BigQuery for AO1 visibility assessment!"
-EOF
-
-cat > quick_test.sh << 'EOF'
-#!/bin/bash
-
-API_URL="http://localhost:${PORT:-8000}"
-
-echo "🧪 Quick AO1 Scanner Test"
-echo "========================"
-
-echo "Testing basic endpoints..."
-
-echo "• Health check:"
-HEALTH=$(curl -s "$API_URL/health")
-echo "  $HEALTH"
-
-echo "• Detailed health:"
-curl -s "$API_URL/health/detailed" | python3 -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    print(f\"  Overall: {data.get('overall_status', 'unknown')}\")
-    components = data.get('components', {})
-    for comp, status in components.items():
-        print(f\"  {comp}: {status.get('status', 'unknown')}\")
-except:
-    print('  Could not parse health data')
 "
 
-echo "• User registration test:"
-REG_RESPONSE=$(curl -s -X POST "$API_URL/auth/register" \
-  -H "Content-Type: application/json" \
-  -d '{"email": "test@company.com", "password": "test123", "full_name": "Test User"}')
+echo "Step 6: Starting AO1 Scanner..."
+mkdir -p data outputs logs results
 
-if echo "$REG_RESPONSE" | grep -q "access_token"; then
-    echo "  ✅ Registration working"
-elif echo "$REG_RESPONSE" | grep -q "already registered"; then
-    echo "  ✅ Registration endpoint working (user exists)"
+echo "Starting server on port ${PORT:-8000}..."
+python run_server.py &
+
+SERVER_PID=$!
+
+sleep 5
+
+echo "Step 7: Testing server..."
+if curl -f http://localhost:${PORT:-8000}/health >/dev/null 2>&1; then
+    echo "✅ AO1 Scanner is running!"
+    echo ""
+    echo "📊 Access Points:"
+    echo "• API: http://localhost:${PORT:-8000}"
+    echo "• Health: http://localhost:${PORT:-8000}/health"
+    echo "• Dashboard: http://localhost:${PORT:-8000}/dashboard/stats"
+    echo ""
+    echo "Press Ctrl+C to stop the server"
+    wait $SERVER_PID
 else
-    echo "  ⚠️  Registration response: $REG_RESPONSE"
+    echo "❌ Server failed to start"
+    kill $SERVER_PID
+    exit 1
+fi
+SCRIPT
+
+chmod +x run_without_docker.sh
+
+echo "✅ No-Docker option created"
+EOF
+
+cat > quick_fix_and_run.sh << 'EOF'
+#!/bin/bash
+
+echo "🚀 Quick Fix and Run AO1 Scanner"
+echo "================================"
+
+# Apply fixes
+./fix_build_issues.sh
+
+# Check if .env exists
+if [ ! -f ".env" ]; then
+    echo "Creating .env template..."
+    ./create_env_template.sh
+    echo ""
+    echo "❌ Please edit .env with your BigQuery credentials first!"
+    echo "Then run this script again."
+    exit 1
+fi
+
+source .env
+
+if [ "$BIGQUERY_PROJECT_ID" = "your-project-id" ]; then
+    echo "❌ Please edit .env with your actual BigQuery credentials"
+    exit 1
 fi
 
 echo ""
-echo "🎯 AO1 Scanner is ready for production scans!"
+echo "Choose deployment method:"
+echo "1. Docker (recommended)"
+echo "2. Docker with debug build"
+echo "3. Lightweight Alpine Docker"
+echo "4. No Docker (Python virtual env)"
+echo ""
+read -p "Enter choice (1-4): " choice
+
+case $choice in
+    1)
+        echo "Building with fixed Dockerfile..."
+        docker build -f Dockerfile.fixed -t ao1-scanner:latest .
+        docker-compose -f docker-compose.simple.yml up -d
+        ;;
+    2)
+        echo "Running debug build..."
+        ./debug_build.sh
+        ;;
+    3)
+        echo "Building lightweight Alpine version..."
+        docker build -f Dockerfile.lightweight -t ao1-scanner:lightweight .
+        docker run -d -p ${PORT:-8000}:8000 --env-file .env \
+            -v $(pwd)/credentials:/app/credentials \
+            -v $(pwd)/data:/app/data \
+            --name ao1-scanner ao1-scanner:lightweight
+        ;;
+    4)
+        echo "Running without Docker..."
+        ./run_without_docker.sh
+        ;;
+    *)
+        echo "Invalid choice"
+        exit 1
+        ;;
+esac
+
+echo ""
+echo "Waiting for service to start..."
+sleep 10
+
+echo "Testing endpoints..."
+if curl -f http://localhost:${PORT:-8000}/health >/dev/null 2>&1; then
+    echo "✅ AO1 Scanner is running!"
+    echo "• Health: http://localhost:${PORT:-8000}/health"
+    echo "• Dashboard: http://localhost:${PORT:-8000}/dashboard/stats"
+else
+    echo "❌ Service not responding. Check logs:"
+    if [ "$choice" = "4" ]; then
+        echo "Check terminal output above"
+    else
+        echo "docker logs ao1-scanner"
+    fi
+fi
 EOF
 
-chmod +x create_env_template.sh run_scanner.sh quick_test.sh
+chmod +x fix_build_issues.sh quick_fix_and_run.sh
 
-echo "✅ Simple deployment setup created!"
+echo "✅ Docker build fixes created!"
 echo ""
-echo "🚀 Two-Step Process:"
+echo "🛠️ To fix your build issues and run:"
 echo ""
-echo "1. Create .env template and edit with your credentials:"
-echo "   ./create_env_template.sh"
-echo "   # Edit .env with your actual BigQuery credentials"
+echo "Option 1 - Quick fix and choose deployment:"
+echo "  ./quick_fix_and_run.sh"
 echo ""
-echo "2. Deploy and run everything:"
-echo "   ./run_scanner.sh"
+echo "Option 2 - Manual steps:"
+echo "  1. ./fix_build_issues.sh"
+echo "  2. docker build -f Dockerfile.fixed -t ao1-scanner:latest ."
+echo "  3. docker-compose -f docker-compose.simple.yml up -d"
 echo ""
-echo "3. Optional - test functionality:"
-echo "   ./quick_test.sh"
+echo "Option 3 - Skip Docker entirely:"
+echo "  ./run_without_docker.sh"
 echo ""
-echo "That's it! Put your credentials in .env, then run it."
+echo "This fixes:"
+echo "• Python package dependency conflicts"
+echo "• License classifier warnings"
+echo "• Subprocess build errors"
+echo "• Docker layer caching issues"
