@@ -1,189 +1,248 @@
 #!/bin/bash
 
-cat > configure_ssl_crt_key.sh << 'EOF'
+cat > fix_docker_registry_ssl.sh << 'EOF'
 #!/bin/bash
 
-echo "🔐 Configuring SSL with CRT and KEY files"
-echo "========================================="
+echo "🔧 Fixing Docker Registry SSL Certificate Issue"
+echo "=============================================="
 
-# Check for both certificate files
-if [ ! -f "ssl/"*.crt ]; then
-    echo "❌ No .crt file found in ssl/ folder"
-    ls -la ssl/
-    exit 1
-fi
-
-if [ ! -f "ssl/"*.key ]; then
-    echo "❌ No .key file found in ssl/ folder"
-    ls -la ssl/
-    exit 1
-fi
-
+# Find your certificate
 CRT_FILE=$(find ssl/ -name "*.crt" | head -1)
-KEY_FILE=$(find ssl/ -name "*.key" | head -1)
+if [ ! -f "$CRT_FILE" ]; then
+    echo "❌ No .crt file found in ssl/ folder"
+    exit 1
+fi
 
-echo "✅ Found certificate: $CRT_FILE"
-echo "✅ Found key: $KEY_FILE"
+echo "✅ Using certificate: $CRT_FILE"
 
-# Create Dockerfile that properly handles CRT and KEY
-cat > Dockerfile << 'DOCKERFILE'
-FROM python:3.11-slim
+echo "Step 1: Adding certificate to macOS system trust..."
+
+# Add to macOS system keychain (this affects Docker Desktop)
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$CRT_FILE"
+
+echo "Step 2: Configuring Docker Desktop certificate trust..."
+
+# Stop Docker Desktop
+echo "Stopping Docker Desktop..."
+osascript -e 'quit app "Docker"'
+sleep 5
+
+# Docker Desktop on Mac stores certificates differently
+DOCKER_CERTS_DIR="$HOME/.docker/certs.d"
+DOCKER_HUB_DIR="$DOCKER_CERTS_DIR/registry-1.docker.io"
+
+mkdir -p "$DOCKER_HUB_DIR"
+
+# Copy certificate for Docker Hub specifically
+cp "$CRT_FILE" "$DOCKER_HUB_DIR/ca.crt"
+
+echo "✅ Added certificate for Docker Hub registry"
+
+# Also add for other common registries
+for registry in "docker.io" "index.docker.io" "registry.docker.io"; do
+    mkdir -p "$DOCKER_CERTS_DIR/$registry"
+    cp "$CRT_FILE" "$DOCKER_CERTS_DIR/$registry/ca.crt"
+    echo "✅ Added certificate for $registry"
+done
+
+echo "Step 3: Configuring Docker daemon for certificate..."
+
+# Create Docker daemon config that respects system certificates
+DOCKER_CONFIG_DIR="$HOME/.docker"
+mkdir -p "$DOCKER_CONFIG_DIR"
+
+cat > "$DOCKER_CONFIG_DIR/daemon.json" << JSON
+{
+  "registry-mirrors": [],
+  "insecure-registries": [],
+  "dns": ["8.8.8.8", "1.1.1.1"],
+  "mtu": 1450,
+  "storage-driver": "overlay2",
+  "log-level": "info",
+  "experimental": false
+}
+JSON
+
+echo "Step 4: Starting Docker Desktop with new configuration..."
+
+# Start Docker Desktop
+open /Applications/Docker.app
+
+echo "Waiting for Docker Desktop to start with new certificates..."
+sleep 20
+
+# Wait for Docker daemon to be ready
+echo "Waiting for Docker daemon..."
+for i in {1..30}; do
+    if docker info >/dev/null 2>&1; then
+        echo "✅ Docker daemon ready"
+        break
+    else
+        echo "  Attempt $i/30..."
+        sleep 2
+    fi
+done
+
+echo "Step 5: Testing Docker Hub connectivity..."
+
+# Test Docker Hub access
+echo "Testing hello-world pull..."
+if timeout 60 docker pull hello-world >/dev/null 2>&1; then
+    echo "✅ Docker Hub connectivity working!"
+    docker rmi hello-world >/dev/null 2>&1
+else
+    echo "❌ Docker Hub still not accessible"
+    echo "Trying additional certificate configurations..."
+fi
+
+echo "Step 6: Testing Python image pull..."
+if timeout 120 docker pull python:3.11-slim >/dev/null 2>&1; then
+    echo "✅ Python image pull successful!"
+else
+    echo "❌ Python image pull failed"
+    echo "Checking Docker Desktop settings..."
+fi
+
+echo ""
+echo "Certificate configuration complete!"
+echo "Files created:"
+echo "• $DOCKER_HUB_DIR/ca.crt"
+echo "• $DOCKER_CONFIG_DIR/daemon.json"
+echo ""
+echo "If still having issues, check Docker Desktop settings:"
+echo "• Docker Desktop > Settings > Docker Engine"
+echo "• Docker Desktop > Settings > Resources > Network"
+EOF
+
+cat > test_docker_connectivity.sh << 'EOF'
+#!/bin/bash
+
+echo "🧪 Testing Docker Connectivity"
+echo "=============================="
+
+echo "Step 1: Basic Docker functionality..."
+if docker info >/dev/null 2>&1; then
+    echo "✅ Docker daemon running"
+else
+    echo "❌ Docker daemon not running"
+    exit 1
+fi
+
+echo "Step 2: Testing network connectivity..."
+if ping -c 1 registry-1.docker.io >/dev/null 2>&1; then
+    echo "✅ Can reach Docker registry"
+else
+    echo "❌ Cannot reach Docker registry"
+fi
+
+echo "Step 3: Testing Docker Hub authentication..."
+docker logout >/dev/null 2>&1
+if timeout 30 docker pull hello-world >/dev/null 2>&1; then
+    echo "✅ Docker Hub pull working"
+    docker rmi hello-world >/dev/null 2>&1
+else
+    echo "❌ Docker Hub pull failing"
+    echo "Checking certificate configuration..."
+    
+    if [ -f "$HOME/.docker/certs.d/registry-1.docker.io/ca.crt" ]; then
+        echo "✅ Certificate configured for Docker Hub"
+    else
+        echo "❌ Certificate not configured for Docker Hub"
+    fi
+fi
+
+echo "Step 4: Testing Python image specifically..."
+if timeout 60 docker pull python:3.11-slim >/dev/null 2>&1; then
+    echo "✅ Python 3.11 image pull successful"
+else
+    echo "❌ Python 3.11 image pull failed"
+    echo "Error details:"
+    docker pull python:3.11-slim 2>&1 | tail -3
+fi
+
+echo "Step 5: Checking certificate store..."
+echo "System certificates:"
+ls -la /etc/ssl/certs/ | grep -i company 2>/dev/null || echo "No company certificates in system store"
+
+echo "Docker certificates:"
+ls -la "$HOME/.docker/certs.d/" 2>/dev/null || echo "No Docker-specific certificates"
+
+echo ""
+echo "🎯 Summary:"
+if timeout 30 docker pull hello-world >/dev/null 2>&1; then
+    echo "✅ Docker connectivity working - ready to build AO1 Scanner"
+    docker rmi hello-world >/dev/null 2>&1
+else
+    echo "❌ Docker connectivity issues persist"
+    echo ""
+    echo "Manual steps to try:"
+    echo "1. Open Docker Desktop > Settings > Docker Engine"
+    echo "2. Add this to the JSON configuration:"
+    echo '   "insecure-registries": ["registry-1.docker.io"]'
+    echo "3. Click 'Apply & Restart'"
+fi
+EOF
+
+cat > build_with_registry_fix.sh << 'EOF'
+#!/bin/bash
+
+echo "🚀 Build AO1 Scanner with Registry Fix"
+echo "====================================="
+
+# Apply registry certificate fix
+./fix_docker_registry_ssl.sh
+
+echo "Testing connectivity before build..."
+./test_docker_connectivity.sh
+
+# Check if we can pull Python image
+if ! timeout 60 docker pull python:3.11-slim >/dev/null 2>&1; then
+    echo "❌ Still cannot pull Python image"
+    echo "Trying alternative base image..."
+    
+    # Try Alpine Python
+    if timeout 60 docker pull python:3.11-alpine >/dev/null 2>&1; then
+        echo "✅ Alpine Python works - using alternative Dockerfile"
+        
+        cat > Dockerfile.alpine << 'DOCKERFILE'
+FROM python:3.11-alpine
 
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    ca-certificates \
-    openssl \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache curl ca-certificates gcc musl-dev
 
-# Copy SSL certificate and key
+# Copy SSL certificates
 COPY ssl/*.crt /usr/local/share/ca-certificates/
-COPY ssl/*.key /usr/local/share/ca-certificates/
-
-# Update certificate authorities
 RUN update-ca-certificates
 
-# Set certificate environment variables
-ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
-ENV SSL_CERT_DIR=/etc/ssl/certs
-ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-
-# Copy requirements first
+# Install Python packages
 COPY requirements.txt .
-
-# Install Python packages with proper SSL
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
-# Copy application
 COPY . .
-
-# Create directories
 RUN mkdir -p data outputs logs credentials results
 
 EXPOSE 8000
-
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
 CMD ["python", "run_server.py"]
 DOCKERFILE
 
-# Create docker-compose.yml with SSL configuration
-cat > docker-compose.yml << 'YAML'
-version: '3.8'
+        DOCKERFILE_TO_USE="Dockerfile.alpine"
+    else
+        echo "❌ Cannot pull any Python images"
+        echo "Check your network/proxy settings"
+        exit 1
+    fi
+else
+    echo "✅ Python 3.11-slim working"
+    DOCKERFILE_TO_USE="Dockerfile"
+fi
 
-services:
-  ao1-scanner:
-    build: .
-    ports:
-      - "${PORT:-8000}:8000"
-    environment:
-      - DATABASE_PATH=/app/data/scanner.duckdb
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/bigquery-service-account.json
-      - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
-      - SSL_CERT_DIR=/etc/ssl/certs
-      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-      - CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-      - ENVIRONMENT=production
-      - LOG_LEVEL=INFO
-    env_file:
-      - .env
-    volumes:
-      - ./data:/app/data
-      - ./outputs:/app/outputs
-      - ./logs:/app/logs
-      - ./credentials:/app/credentials
-      - ./results:/app/results
-      - ./ssl:/app/ssl:ro
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
+echo "Building AO1 Scanner..."
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
-
-volumes:
-  redis-data:
-YAML
-
-# Update .dockerignore to include SSL files
-cat > .dockerignore << 'IGNORE'
-.git
-.gitignore
-README.md
-.dockerignore
-.env.example
-__pycache__
-*.pyc
-.pytest_cache
-.coverage
-*.log
-venv
-.venv
-outputs
-logs
-results
-data
-*.duckdb
-node_modules
-.DS_Store
-
-# Include SSL certificate files
-!ssl/
-!ssl/*.crt
-!ssl/*.key
-IGNORE
-
-# Create requirements.txt with SSL-aware packages
-cat > requirements.txt << 'REQS'
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-google-cloud-bigquery==3.12.0
-google-cloud-resource-manager==1.10.4
-google-auth==2.23.4
-PyJWT==2.8.0
-duckdb==0.9.2
-pydantic[email]==2.5.0
-python-dotenv==1.0.0
-structlog==23.2.0
-httpx==0.25.2
-redis==5.0.1
-certifi==2023.11.17
-urllib3==2.1.0
-REQS
-
-echo "✅ Configured Docker to use both CRT and KEY files"
-echo "Certificate: $CRT_FILE"
-echo "Key: $KEY_FILE"
-EOF
-
-cat > deploy_with_crt_key.sh << 'EOF'
-#!/bin/bash
-
-echo "🚀 Deploy with CRT and KEY files"
-echo "================================"
-
-# Configure SSL
-./configure_ssl_crt_key.sh
-
+# Ensure .env exists
 if [ ! -f ".env" ]; then
     echo "❌ .env file needed"
     exit 1
@@ -196,7 +255,7 @@ if [ "$BIGQUERY_PROJECT_ID" = "your-project-id" ]; then
     exit 1
 fi
 
-echo "Creating BigQuery credentials..."
+# Create credentials
 mkdir -p credentials data outputs logs results
 
 cat > credentials/bigquery-service-account.json << JSON
@@ -214,120 +273,43 @@ cat > credentials/bigquery-service-account.json << JSON
 }
 JSON
 
-echo "Stopping existing containers..."
-docker-compose down
+# Build with appropriate Dockerfile
+echo "Building with $DOCKERFILE_TO_USE..."
+docker build -f "$DOCKERFILE_TO_USE" -t ao1-scanner:latest .
 
-echo "Building with SSL certificate and key..."
-docker-compose build --no-cache
-
-echo "Starting services..."
-docker-compose up -d
-
-echo "Waiting for services to start..."
-sleep 20
-
-echo "Testing SSL configuration..."
-if docker-compose exec -T ao1-scanner curl -s https://www.google.com >/dev/null 2>&1; then
-    echo "✅ SSL certificate working properly"
-else
-    echo "⚠️ SSL may need additional configuration"
-    echo "Checking certificate details..."
-    docker-compose exec -T ao1-scanner ls -la /etc/ssl/certs/ | grep -v lrwxrwxrwx | head -5
-fi
-
-echo "Testing AO1 Scanner..."
-PORT=${PORT:-8000}
-for i in {1..15}; do
-    if curl -f http://localhost:${PORT}/health >/dev/null 2>&1; then
-        echo "✅ AO1 Scanner running at http://localhost:${PORT}"
-        break
+if [ $? -eq 0 ]; then
+    echo "✅ Build successful!"
+    
+    # Start with docker-compose
+    docker-compose up -d
+    
+    echo "Waiting for services..."
+    sleep 15
+    
+    if curl -f http://localhost:${PORT:-8000}/health >/dev/null 2>&1; then
+        echo "✅ AO1 Scanner running at http://localhost:${PORT:-8000}"
     else
-        echo "⏳ Waiting for scanner... (attempt $i/15)"
-        sleep 3
+        echo "❌ Service not responding"
+        docker-compose logs --tail=10 ao1-scanner
     fi
-done
-
-echo ""
-echo "🎉 Deployment complete with SSL certificate and key!"
-echo "📊 Access: http://localhost:${PORT}"
-echo "🔐 SSL files properly configured in container"
+else
+    echo "❌ Build failed"
+fi
 EOF
 
-cat > verify_ssl_files.sh << 'EOF'
-#!/bin/bash
+chmod +x fix_docker_registry_ssl.sh test_docker_connectivity.sh build_with_registry_fix.sh
 
-echo "🔍 Verifying SSL Certificate and Key Files"
-echo "=========================================="
-
-echo "Step 1: Checking local SSL files..."
-if ls ssl/*.crt >/dev/null 2>&1; then
-    for crt_file in ssl/*.crt; do
-        echo "✅ Certificate: $crt_file"
-        # Show certificate details
-        openssl x509 -in "$crt_file" -text -noout | grep -E "(Subject|Issuer|Not Before|Not After)" 2>/dev/null || echo "  (Certificate details not readable)"
-    done
-else
-    echo "❌ No .crt files found in ssl/"
-fi
-
-if ls ssl/*.key >/dev/null 2>&1; then
-    for key_file in ssl/*.key; do
-        echo "✅ Private key: $key_file"
-        # Verify key format
-        openssl rsa -in "$key_file" -check -noout 2>/dev/null && echo "  (Key format valid)" || echo "  (Key format may need checking)"
-    done
-else
-    echo "❌ No .key files found in ssl/"
-fi
-
+echo "✅ Docker Registry SSL Fix Created!"
 echo ""
-echo "Step 2: Checking certificate and key match..."
-if ls ssl/*.crt >/dev/null 2>&1 && ls ssl/*.key >/dev/null 2>&1; then
-    CRT_FILE=$(ls ssl/*.crt | head -1)
-    KEY_FILE=$(ls ssl/*.key | head -1)
-    
-    CRT_HASH=$(openssl x509 -noout -modulus -in "$CRT_FILE" 2>/dev/null | openssl md5)
-    KEY_HASH=$(openssl rsa -noout -modulus -in "$KEY_FILE" 2>/dev/null | openssl md5)
-    
-    if [ "$CRT_HASH" = "$KEY_HASH" ]; then
-        echo "✅ Certificate and key match"
-    else
-        echo "⚠️ Certificate and key may not match"
-    fi
-fi
-
+echo "🔧 To fix the Docker registry certificate issue:"
 echo ""
-echo "Step 3: Checking if container is using certificates..."
-if docker-compose ps | grep -q "Up"; then
-    echo "Checking certificates in running container..."
-    docker-compose exec -T ao1-scanner ls -la /usr/local/share/ca-certificates/ 2>/dev/null || echo "Container not accessible"
-    
-    echo "Testing HTTPS from container..."
-    docker-compose exec -T ao1-scanner curl -s -o /dev/null -w "%{http_code}" https://www.google.com 2>/dev/null || echo "HTTPS test failed"
-else
-    echo "⚠️ Container not running"
-fi
-
+echo "1. Fix Docker registry SSL trust:"
+echo "   ./fix_docker_registry_ssl.sh"
 echo ""
-echo "🎯 SSL Status Summary:"
-echo "• CRT files: $(ls ssl/*.crt 2>/dev/null | wc -l | tr -d ' ')"
-echo "• KEY files: $(ls ssl/*.key 2>/dev/null | wc -l | tr -d ' ')"
-echo "• Docker configured: $([ -f "Dockerfile" ] && grep -q "ssl" Dockerfile && echo "Yes" || echo "No")"
-EOF
-
-chmod +x configure_ssl_crt_key.sh deploy_with_crt_key.sh verify_ssl_files.sh
-
-echo "✅ SSL CRT and KEY configuration created!"
+echo "2. Test connectivity:"
+echo "   ./test_docker_connectivity.sh"
 echo ""
-echo "🔐 To use your .crt and .key files:"
+echo "3. Build with registry fix:"
+echo "   ./build_with_registry_fix.sh"
 echo ""
-echo "1. Configure for CRT and KEY files:"
-echo "   ./configure_ssl_crt_key.sh"
-echo ""
-echo "2. Deploy with proper SSL:"
-echo "   ./deploy_with_crt_key.sh"
-echo ""
-echo "3. Verify SSL setup:"
-echo "   ./verify_ssl_files.sh"
-echo ""
-echo "This will properly use both your certificate (.crt) and private key (.key) files"
+echo "This specifically fixes the registry-1.docker.io certificate verification error"
