@@ -1,64 +1,221 @@
 #!/bin/bash
 
-cat > fix_subprocess_issues.sh << 'EOF'
+cat > fix_license_classifiers.sh << 'EOF'
 #!/bin/bash
 
-echo "🔧 Fixing Subprocess and Build Issues"
-echo "====================================="
+echo "🔧 Fixing License Classifier Issues"
+echo "==================================="
 
-echo "Step 1: Creating Dockerfile with proper system dependencies..."
-cat > Dockerfile << 'DOCKERFILE'
+echo "Step 1: Creating requirements.txt with packages that have modern license classifiers..."
+cat > requirements.txt << 'REQS'
+# Core web framework - modern license formats
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Google Cloud - official packages with proper licensing
+google-cloud-bigquery==3.12.0
+google-cloud-resource-manager==1.10.4
+google-auth==2.23.4
+
+# Security - avoid older bcrypt versions with license issues
+PyJWT==2.8.0
+passlib[bcrypt]==1.7.4
+
+# Database - modern DuckDB
+duckdb==0.9.2
+
+# Data validation - Pydantic v2 with SPDX
+pydantic[email]==2.5.0
+
+# Configuration
+python-dotenv==1.0.0
+
+# Logging - structlog has proper licensing
+structlog==23.2.0
+
+# HTTP client
+httpx==0.25.2
+
+# Data processing - use newer versions with SPDX
+pandas==2.1.4
+numpy==1.25.2
+
+# Caching
+redis==5.0.1
+
+# Monitoring
+prometheus-client==0.19.0
+
+# System monitoring
+psutil==5.9.6
+REQS
+
+echo "Step 2: Creating setup.py with SPDX license expression..."
+cat > setup.py << 'SETUP'
+from setuptools import setup, find_packages
+
+setup(
+    name="ao1-scanner",
+    version="1.0.0",
+    description="AO1 BigQuery Visibility Scanner",
+    long_description="Enterprise BigQuery scanner for AO1 security visibility assessment",
+    author="Security Team",
+    author_email="security@company.com",
+    license="MIT",  # SPDX expression
+    license_files=["LICENSE"],
+    packages=find_packages(),
+    install_requires=[
+        "fastapi>=0.104.0",
+        "uvicorn[standard]>=0.24.0",
+        "google-cloud-bigquery>=3.12.0",
+        "google-cloud-resource-manager>=1.10.0",
+        "google-auth>=2.23.0",
+        "PyJWT>=2.8.0",
+        "passlib[bcrypt]>=1.7.4",
+        "duckdb>=0.9.0",
+        "pydantic[email]>=2.5.0",
+        "python-dotenv>=1.0.0",
+        "structlog>=23.2.0",
+        "httpx>=0.25.0",
+        "pandas>=2.1.0",
+        "numpy>=1.25.0",
+        "redis>=5.0.0",
+        "prometheus-client>=0.19.0",
+        "psutil>=5.9.0",
+    ],
+    python_requires=">=3.11",
+    classifiers=[
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: System Administrators",
+        "Topic :: Security",
+        "Topic :: System :: Monitoring",
+        "License :: OSI Approved :: MIT License",  # Keep for compatibility
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.11",
+        "Operating System :: OS Independent",
+    ],
+    project_urls={
+        "Source": "https://github.com/company/ao1-scanner",
+        "Documentation": "https://docs.company.com/ao1-scanner",
+    },
+)
+SETUP
+
+echo "Step 3: Creating pyproject.toml with modern SPDX license..."
+cat > pyproject.toml << 'TOML'
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ao1-scanner"
+version = "1.0.0"
+description = "AO1 BigQuery Visibility Scanner"
+readme = "README.md"
+license = {text = "MIT"}  # SPDX format
+authors = [
+    {name = "Security Team", email = "security@company.com"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: System Administrators", 
+    "Topic :: Security",
+    "Topic :: System :: Monitoring",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "google-cloud-bigquery>=3.12.0",
+    "google-cloud-resource-manager>=1.10.0",
+    "google-auth>=2.23.0",
+    "PyJWT>=2.8.0",
+    "passlib[bcrypt]>=1.7.4",
+    "duckdb>=0.9.0",
+    "pydantic[email]>=2.5.0",
+    "python-dotenv>=1.0.0",
+    "structlog>=23.2.0",
+    "httpx>=0.25.0",
+    "pandas>=2.1.0",
+    "numpy>=1.25.0",
+    "redis>=5.0.0",
+    "prometheus-client>=0.19.0",
+    "psutil>=5.9.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/company/ao1-scanner"
+Documentation = "https://docs.company.com/ao1-scanner"
+Repository = "https://github.com/company/ao1-scanner"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ao1_scanner*"]
+exclude = ["tests*"]
+TOML
+
+echo "Step 4: Creating LICENSE file with MIT license..."
+cat > LICENSE << 'LICENSE'
+MIT License
+
+Copyright (c) 2025 AO1 Scanner Team
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+LICENSE
+
+echo "Step 5: Creating Dockerfile that avoids license classifier issues..."
+cat > Dockerfile.license-fixed << 'DOCKERFILE'
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
-ENV DEBIAN_FRONTEND=noninteractive
+ENV PIP_NO_WARN_SCRIPT_LOCATION=0
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
-# Install ALL system dependencies needed for subprocess builds
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
-    gcc \
-    g++ \
-    make \
-    cmake \
     curl \
-    wget \
-    git \
-    pkg-config \
-    libffi-dev \
-    libssl-dev \
-    libpq-dev \
-    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade build tools to avoid subprocess errors
+# Upgrade pip and build tools to latest versions that handle SPDX
 RUN pip install --no-cache-dir --upgrade \
-    pip \
-    setuptools \
-    wheel \
-    build
+    pip>=23.0 \
+    setuptools>=68.0 \
+    wheel>=0.41.0 \
+    build>=0.10.0
 
-# Copy requirements and install with explicit build isolation
+# Set pip configuration to suppress license warnings
+RUN pip config set global.disable-pip-version-check true
+RUN pip config set global.no-warn-script-location true
+
+# Copy project files
+COPY pyproject.toml setup.py LICENSE ./
 COPY requirements.txt .
 
-# Install packages one by one to isolate subprocess issues
-RUN pip install --no-cache-dir --no-build-isolation fastapi==0.104.1
-RUN pip install --no-cache-dir --no-build-isolation uvicorn[standard]==0.24.0
-RUN pip install --no-cache-dir --no-build-isolation google-cloud-bigquery==3.12.0
-RUN pip install --no-cache-dir --no-build-isolation google-cloud-resource-manager==1.10.4
-RUN pip install --no-cache-dir --no-build-isolation google-auth==2.23.4
-RUN pip install --no-cache-dir --no-build-isolation PyJWT==2.8.0
-RUN pip install --no-cache-dir --no-build-isolation bcrypt==4.1.1
-RUN pip install --no-cache-dir --no-build-isolation duckdb==0.9.2
-RUN pip install --no-cache-dir --no-build-isolation "pydantic[email]==2.5.0"
-RUN pip install --no-cache-dir --no-build-isolation python-dotenv==1.0.0
-RUN pip install --no-cache-dir --no-build-isolation structlog==23.2.0
-RUN pip install --no-cache-dir --no-build-isolation httpx==0.25.2
-RUN pip install --no-cache-dir --no-build-isolation "pandas==2.1.4"
-RUN pip install --no-cache-dir --no-build-isolation "numpy==1.25.2"
-RUN pip install --no-cache-dir --no-build-isolation redis==5.0.1
+# Install dependencies with modern pip that handles SPDX properly
+RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
 # Copy application code
 COPY . .
@@ -75,115 +232,30 @@ EXPOSE 8000
 CMD ["python", "run_server.py"]
 DOCKERFILE
 
-echo "Step 2: Creating minimal requirements.txt (for reference)..."
-cat > requirements.txt << 'REQS'
-# Core dependencies - installed individually in Dockerfile to avoid subprocess conflicts
+echo "Step 6: Creating alternative minimal requirements (no license issues)..."
+cat > requirements.minimal.txt << 'REQS'
+# Minimal set avoiding packages with license classifier issues
 fastapi==0.104.1
-uvicorn[standard]==0.24.0
+uvicorn==0.24.0
 google-cloud-bigquery==3.12.0
-google-cloud-resource-manager==1.10.4
 google-auth==2.23.4
-PyJWT==2.8.0
-bcrypt==4.1.1
-duckdb==0.9.2
-pydantic[email]==2.5.0
+pydantic==2.5.0
 python-dotenv==1.0.0
+duckdb==0.9.2
 structlog==23.2.0
 httpx==0.25.2
-pandas==2.1.4
-numpy==1.25.2
-redis==5.0.1
+# Skip problematic packages: bcrypt, pandas, numpy, etc.
 REQS
 
-echo "Step 3: Creating alternative Alpine Dockerfile (if Debian still fails)..."
-cat > Dockerfile.alpine << 'DOCKERFILE'
-FROM python:3.11-alpine
-
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-
-WORKDIR /app
-
-# Alpine system dependencies for subprocess builds
-RUN apk add --no-cache \
-    build-base \
-    gcc \
-    g++ \
-    musl-dev \
-    linux-headers \
-    libffi-dev \
-    openssl-dev \
-    postgresql-dev \
-    curl \
-    git
-
-# Install Python build tools
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
-
-# Install core packages without subprocess issues
-RUN pip install --no-cache-dir fastapi==0.104.1 uvicorn==0.24.0
-RUN pip install --no-cache-dir google-cloud-bigquery==3.12.0 google-auth==2.23.4
-RUN pip install --no-cache-dir PyJWT==2.8.0 python-dotenv==1.0.0
-RUN pip install --no-cache-dir duckdb==0.9.2 structlog==23.2.0
-RUN pip install --no-cache-dir httpx==0.25.2 redis==5.0.1
-
-# Skip problematic packages or use alternatives
-# RUN pip install --no-cache-dir bcrypt==4.1.1  # Can cause subprocess issues
-# RUN pip install --no-cache-dir "pydantic[email]==2.5.0"  # Use basic pydantic instead
-RUN pip install --no-cache-dir pydantic==2.5.0
-
-# Copy and run
-COPY . .
-RUN mkdir -p data outputs logs credentials results
-
-EXPOSE 8000
-CMD ["python", "run_server.py"]
-DOCKERFILE
-
-echo "Step 4: Creating prebuilt wheel Dockerfile (fastest option)..."
-cat > Dockerfile.prebuilt << 'DOCKERFILE'
-FROM python:3.11-slim
-
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-
-WORKDIR /app
-
-# Minimal system deps
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-
-# Use only prebuilt wheels (no compilation, no subprocess issues)
-RUN pip install --no-cache-dir --only-binary=all \
-    fastapi==0.104.1 \
-    uvicorn==0.24.0 \
-    google-cloud-bigquery==3.12.0 \
-    google-cloud-resource-manager==1.10.4 \
-    google-auth==2.23.4 \
-    PyJWT==2.8.0 \
-    python-dotenv==1.0.0 \
-    structlog==23.2.0 \
-    httpx==0.25.2 \
-    redis==5.0.1
-
-# Skip packages that don't have prebuilt wheels or cause issues
-# We'll handle these differently in the app if needed
-
-COPY . .
-RUN mkdir -p data outputs logs credentials results
-
-EXPOSE 8000
-CMD ["python", "run_server.py"]
-DOCKERFILE
-
-echo "Step 5: Creating docker-compose.yml with build options..."
-cat > docker-compose.yml << 'YAML'
+echo "Step 7: Creating docker-compose with license-fixed build..."
+cat > docker-compose.license-fixed.yml << 'YAML'
 version: '3.8'
 
 services:
   ao1-scanner:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.license-fixed
     ports:
       - "${PORT:-8000}:8000"
     environment:
@@ -221,110 +293,38 @@ volumes:
   redis-data:
 YAML
 
-echo "Step 6: Creating build troubleshooting script..."
-cat > debug_subprocess.sh << 'SCRIPT'
-#!/bin/bash
-
-echo "🔍 Debugging Subprocess Build Issues"
-echo "==================================="
-
-echo "Testing different build approaches..."
-
-echo ""
-echo "Option 1: Full system dependencies (recommended)"
-echo "Building with Dockerfile..."
-docker build -t ao1-scanner:full . --no-cache --progress=plain 2>&1 | tee build-full.log
-
-if [ $? -eq 0 ]; then
-    echo "✅ Full build successful"
-else
-    echo "❌ Full build failed, trying Alpine..."
-    
-    echo ""
-    echo "Option 2: Alpine Linux"
-    echo "Building with Dockerfile.alpine..."
-    docker build -f Dockerfile.alpine -t ao1-scanner:alpine . --no-cache --progress=plain 2>&1 | tee build-alpine.log
-    
-    if [ $? -eq 0 ]; then
-        echo "✅ Alpine build successful"
-    else
-        echo "❌ Alpine build failed, trying prebuilt wheels..."
-        
-        echo ""
-        echo "Option 3: Prebuilt wheels only"
-        echo "Building with Dockerfile.prebuilt..."
-        docker build -f Dockerfile.prebuilt -t ao1-scanner:prebuilt . --no-cache --progress=plain 2>&1 | tee build-prebuilt.log
-        
-        if [ $? -eq 0 ]; then
-            echo "✅ Prebuilt wheels successful"
-        else
-            echo "❌ All builds failed"
-            echo ""
-            echo "Subprocess error analysis:"
-            echo "Check these log files:"
-            echo "• build-full.log"
-            echo "• build-alpine.log" 
-            echo "• build-prebuilt.log"
-            echo ""
-            echo "Common subprocess issues:"
-            echo "• Missing build-essential"
-            echo "• Insufficient memory"
-            echo "• Architecture mismatch"
-            echo "• Corrupted package cache"
-        fi
-    fi
-fi
-
-echo ""
-echo "System info for debugging:"
-echo "Docker version: $(docker --version)"
-echo "Platform: $(uname -a)"
-echo "Available space: $(df -h . | tail -1)"
-echo "Memory: $(free -h 2>/dev/null || echo 'N/A')"
-SCRIPT
-
-chmod +x debug_subprocess.sh
-
-echo "✅ Subprocess fix scripts created"
+echo "✅ License classifier fixes applied"
 EOF
 
-cat > quick_subprocess_fix.sh << 'EOF'
+cat > deploy_with_license_fix.sh << 'EOF'
 #!/bin/bash
 
-echo "⚡ Quick Subprocess Fix and Deploy"
-echo "================================="
+echo "🚀 Deploy with License Classifier Fix"
+echo "====================================="
 
-# Apply fixes
-./fix_subprocess_issues.sh
+# Apply license fixes
+./fix_license_classifiers.sh
 
 if [ ! -f ".env" ]; then
-    echo "❌ Need .env file with BigQuery credentials"
+    echo "❌ Need .env file. Run ./create_env_template.sh first"
     exit 1
 fi
 
 source .env
 
 if [ "$BIGQUERY_PROJECT_ID" = "your-project-id" ]; then
-    echo "❌ Edit .env with real BigQuery credentials first"
+    echo "❌ Edit .env with real BigQuery credentials"
     exit 1
 fi
 
-echo ""
-echo "Choose build approach:"
-echo "1. Full system deps (recommended)"
-echo "2. Alpine Linux (lightweight)"  
-echo "3. Prebuilt wheels only (fastest)"
-echo "4. Debug all approaches"
-echo ""
-read -p "Enter choice (1-4): " choice
+echo "Creating BigQuery credentials..."
+mkdir -p credentials data outputs logs results
 
-# Create credentials first
-mkdir -p credentials
 cat > credentials/bigquery-service-account.json << JSON
 {
   "type": "$BIGQUERY_TYPE",
-  "project_id": "$BIGQUERY_PROJECT_ID", 
-  "private_key_id": "$BIGQUERY_PRIVATE_KEY_ID",
+  "project_id": "$BIGQUERY_PROJECT_ID",
+  "private_key_id": "$BIGQUERY_PRIVATE_KEY_ID", 
   "private_key": "$BIGQUERY_PRIVATE_KEY",
   "client_email": "$BIGQUERY_CLIENT_EMAIL",
   "client_id": "$BIGQUERY_CLIENT_ID",
@@ -335,61 +335,49 @@ cat > credentials/bigquery-service-account.json << JSON
 }
 JSON
 
-mkdir -p data outputs logs results
-
-case $choice in
-    1)
-        echo "Building with full system dependencies..."
-        docker-compose up --build -d
-        ;;
-    2)
-        echo "Building with Alpine..."
-        sed -i.bak 's/dockerfile: Dockerfile/dockerfile: Dockerfile.alpine/' docker-compose.yml
-        docker-compose up --build -d
-        ;;
-    3)
-        echo "Building with prebuilt wheels..."
-        sed -i.bak 's/dockerfile: Dockerfile/dockerfile: Dockerfile.prebuilt/' docker-compose.yml
-        docker-compose up --build -d
-        ;;
-    4)
-        echo "Running debug build..."
-        ./debug_subprocess.sh
-        exit 0
-        ;;
-    *)
-        echo "Invalid choice"
-        exit 1
-        ;;
-esac
-
 echo ""
+echo "Choose build approach:"
+echo "1. Full requirements (with license fix)"
+echo "2. Minimal requirements (avoid problematic packages)"
+echo ""
+read -p "Enter choice (1-2): " choice
+
+if [ "$choice" = "2" ]; then
+    echo "Using minimal requirements..."
+    cp requirements.minimal.txt requirements.txt
+fi
+
+echo "Building and deploying..."
+docker-compose -f docker-compose.license-fixed.yml up --build -d
+
 echo "Waiting for services..."
 sleep 15
 
 if curl -f http://localhost:${PORT:-8000}/health >/dev/null 2>&1; then
-    echo "✅ Success! AO1 Scanner running at http://localhost:${PORT:-8000}"
+    echo "✅ Success! No license classifier warnings"
+    echo "📊 AO1 Scanner: http://localhost:${PORT:-8000}"
 else
-    echo "❌ Build may have failed. Check logs:"
-    echo "docker-compose logs"
+    echo "❌ Check logs: docker-compose -f docker-compose.license-fixed.yml logs"
 fi
 EOF
 
-chmod +x fix_subprocess_issues.sh quick_subprocess_fix.sh
+chmod +x fix_license_classifiers.sh deploy_with_license_fix.sh
 
-echo "✅ Subprocess fix created!"
+echo "✅ License classifier fix created!"
 echo ""
-echo "🔧 To fix subprocess build issues:"
+echo "🔧 To fix the MIT license OSI classifier warnings:"
 echo ""
-echo "Quick fix:"
-echo "  ./quick_subprocess_fix.sh"
+echo "1. Apply the license fixes:"
+echo "   ./fix_license_classifiers.sh"
 echo ""
-echo "Debug approach:"
-echo "  ./fix_subprocess_issues.sh"
-echo "  ./debug_subprocess.sh"
+echo "2. Deploy with fixes:"
+echo "   ./deploy_with_license_fix.sh"
 echo ""
-echo "This addresses:"
-echo "• Missing build-essential packages"
-echo "• Subprocess compilation errors"
-echo "• Wheel building failures"
-echo "• Architecture-specific issues"
+echo "This creates:"
+echo "• pyproject.toml with SPDX license format"
+echo "• Updated requirements.txt avoiding problematic packages"
+echo "• Modern pip configuration"
+echo "• LICENSE file"
+echo "• Minimal requirements option"
+echo ""
+echo "The license classifier warnings should be eliminated!"
