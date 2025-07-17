@@ -203,3 +203,45 @@ class ValueContentScanner:
             return [t.table_id for t in tables if t.table_type == 'TABLE']
         except Exception:
             return []
+
+from resilience_manager import resilience_manager
+from performance_monitor import performance_monitor
+
+class ValueContentScanner:
+    async def _scan_table_values_resilient(self, project_id: str, dataset_id: str, table_id: str):
+        resource_id = f"{project_id}.{dataset_id}.{table_id}"
+        operation_id = f"scan_{int(time.time())}_{resource_id}"
+        
+        metrics = performance_monitor.start_operation(operation_id, "table_scan", resource_id)
+        
+        try:
+            async def scan_operation():
+                return await self._scan_table_values(project_id, dataset_id, table_id)
+            
+            result = await resilience_manager.execute_with_resilience(
+                scan_operation, resource_id, "table_scan"
+            )
+            
+            performance_monitor.update_operation(operation_id, 
+                rows_scanned=len
+
+from resilience_manager import resilience_manager
+from performance_monitor import performance_monitor
+
+class ValueContentScanner:
+    async def _scan_table_values_resilient(self, project_id: str, dataset_id: str, table_id: str):
+        resource_id = f"{project_id}.{dataset_id}.{table_id}"
+        operation_id = f"scan_{int(time.time())}_{resource_id}"
+        
+        metrics = performance_monitor.start_operation(operation_id, "table_scan", resource_id)
+        
+        try:
+            async def scan_operation():
+                return await self._scan_table_values(project_id, dataset_id, table_id)
+            
+            result = await resilience_manager.execute_with_resilience(
+                scan_operation, resource_id, "table_scan"
+            )
+            
+            performance_monitor.update_operation(operation_id, 
+                rows_scanned=len

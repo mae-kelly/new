@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ao1-scanner-config
+  namespace: ao1-scanner
+data:
+  MAX_PROJECTS_PER_SCAN: "50"
+  MAX_TABLES_PER_PROJECT: "200"
+  SCAN_TIMEOUT_MINUTES: "60"
+  LOG_LEVEL: "INFO"
+  ENVIRONMENT: "production"

@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ao1-scanner
+  namespace: ao1-scanner
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ao1-scanner
+  template:
+    metadata:
+      labels:
+        app: ao1-scanner
+    spec:
+      containers:
+      - name: ao1-scanner
+        image: ao1-scanner:latest
+        ports:
+        - containerPort: 8000
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        env:
+        - name: PORT
+          value: "8000"
+        - name: HOST
+          value: "0.0.0.0"
+        - name: JWT_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ao1-scanner-secrets
+              key: jwt-secret
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/app/credentials/service-account.json"
+        envFrom:
+        - configMapRef:
+            name: ao1-scanner-config
+        volumeMounts:
+        - name: gcp-credentials
+          mountPath: /app/credentials
+          readOnly: true
+        - name: data-volume
+          mountPath: /app/data
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: gcp-credentials
+        secret:
+          secretName: ao1-scanner-secrets
+          items:
+          - key: gcp-credentials
+            path: service-account.json
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: ao1-scanner-data

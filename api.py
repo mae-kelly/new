@@ -271,3 +271,97 @@ async def global_exception_handler(request: Request, exc: Exception):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+from realtime_api import manager, get_scan_progress_realtime
+
+@app.websocket("/ws/scan/{job_id}")
+async def websocket_scan_progress(websocket: WebSocket, job_id: str):
+    await manager.connect(websocket, job_id)
+    try:
+        while True:
+            progress = await get_scan_progress_realtime(job_id)
+            if progress:
+                await manager.send_personal_message(json.dumps(progress), websocket)
+            await asyncio.sleep(2)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, job_id)
+
+@app.get("/scans/{job_id}/progress")
+async def get_scan_progress_http(job_id: str, current_user = Depends(get_current_user)):
+    progress = await get_scan_progress_realtime(job_id)
+    if not progress:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return progress
+
+@app.get("/dashboard/stats")
+async def get_dashboard_stats(current_user = Depends(get_current_user)):
+    from realtime_api import get_dashboard_stats
+    return await get_dashboard_stats(current_user)
+
+@app.get("/reports/executive/{job_id}")
+async def get_executive_report(job_id: str, current_user = Depends(get_current_user)):
+    from executive_reports import ExecutiveReportGenerator
+    
+    job = db.get_scan_job(job_id)
+    if not job or job.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    results = job_manager.get_job_results(job_id)
+    scan_results = {"visibility_detections": results, "ao1_assessment": {}}
+    
+    generator = ExecutiveReportGenerator()
+    report = generator.generate_executive_summary(scan_results)
+    return report
+
+@app.get("/performance/summary")
+async def get_performance_summary(current_user = Depends(get_current_user)):
+    from performance_monitor import performance_monitor
+    return performance_monitor.get_performance_summary()
+
+
+from realtime_api import manager, get_scan_progress_realtime
+
+@app.websocket("/ws/scan/{job_id}")
+async def websocket_scan_progress(websocket: WebSocket, job_id: str):
+    await manager.connect(websocket, job_id)
+    try:
+        while True:
+            progress = await get_scan_progress_realtime(job_id)
+            if progress:
+                await manager.send_personal_message(json.dumps(progress), websocket)
+            await asyncio.sleep(2)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, job_id)
+
+@app.get("/scans/{job_id}/progress")
+async def get_scan_progress_http(job_id: str, current_user = Depends(get_current_user)):
+    progress = await get_scan_progress_realtime(job_id)
+    if not progress:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return progress
+
+@app.get("/dashboard/stats")
+async def get_dashboard_stats(current_user = Depends(get_current_user)):
+    from realtime_api import get_dashboard_stats
+    return await get_dashboard_stats(current_user)
+
+@app.get("/reports/executive/{job_id}")
+async def get_executive_report(job_id: str, current_user = Depends(get_current_user)):
+    from executive_reports import ExecutiveReportGenerator
+    
+    job = db.get_scan_job(job_id)
+    if not job or job.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    results = job_manager.get_job_results(job_id)
+    scan_results = {"visibility_detections": results, "ao1_assessment": {}}
+    
+    generator = ExecutiveReportGenerator()
+    report = generator.generate_executive_summary(scan_results)
+    return report
+
+@app.get("/performance/summary")
+async def get_performance_summary(current_user = Depends(get_current_user)):
+    from performance_monitor import performance_monitor
+    return performance_monitor.get_performance_summary()
+

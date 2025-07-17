@@ -156,3 +156,89 @@ class QuantumAO1Engine:
         uniqueness_bonus = len(set(matches)) / max(len(matches), 1)
         
         return min(base_confidence * uniqueness_bonus, 1.0)
+
+from industry_patterns import IndustryPatternEngine
+
+class QuantumAO1Engine:
+    def __init__(self):
+        self.visibility_extractors = {
+            'network_presence': {
+                'ipv4': r'(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)',
+                'ipv6': r'(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}',
+                'fqdn': r'[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*',
+                'ports': r':\d{1,5}\b'
+            },
+            'endpoint_identity': {
+                'hostname_enterprise': r'\b[A-Z]{2,4}-[A-Z0-9]+-\d+\b',
+                'hostname_workstation': r'\bWS-[A-Z0-9]+-\d+\b',
+                'hostname_server': r'\bSRV-[A-Z0-9]+-\d+\b',
+                'device_guid': r'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b'
+            },
+            'identity_context': {
+                'email': r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
+                'domain_user': r'\b[A-Za-z0-9_-]+\\[A-Za-z0-9_.-]+\b',
+                'logon_event': r'\b(?:4624|4625|4648|4672|4768|4769|4776|4778|4779)\b'
+            },
+            'application_telemetry': {
+                'http_status': r'\b[1-5][0-9]{2}\b',
+                'api_endpoint': r'/api/[a-zA-Z0-9/_-]+',
+                'url_path': r'https?://[^\s]+'
+            },
+            'cloud_infrastructure': {
+                'aws_instance': r'\bi-[0-9a-f]{8,17}\b',
+                'aws_volume': r'\bvol-[0-9a-f]{8,17}\b',
+                'region_code': r'\b(?:us|eu|ap|ca)-(?:east|west|central|north|south)-[0-9][a-z]?\b'
+            }
+        }
+        self.industry_engine = IndustryPatternEngine()
+    
+    def quantum_extract_enhanced(self, data_series, source_ref: str):
+        base_detections = self.quantum_extract(data_series, source_ref)
+        industry_context = self.industry_engine.detect_industry_context(base_detections)
+        enhanced_detections = self.industry_engine.enhance_detections_with_industry_context(
+            base_detections, industry_context
+        )
+        return enhanced_detections, industry_context
+
+from industry_patterns import IndustryPatternEngine
+
+class QuantumAO1Engine:
+    def __init__(self):
+        self.visibility_extractors = {
+            'network_presence': {
+                'ipv4': r'(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)',
+                'ipv6': r'(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}',
+                'fqdn': r'[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*',
+                'ports': r':\d{1,5}\b'
+            },
+            'endpoint_identity': {
+                'hostname_enterprise': r'\b[A-Z]{2,4}-[A-Z0-9]+-\d+\b',
+                'hostname_workstation': r'\bWS-[A-Z0-9]+-\d+\b',
+                'hostname_server': r'\bSRV-[A-Z0-9]+-\d+\b',
+                'device_guid': r'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b'
+            },
+            'identity_context': {
+                'email': r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
+                'domain_user': r'\b[A-Za-z0-9_-]+\\[A-Za-z0-9_.-]+\b',
+                'logon_event': r'\b(?:4624|4625|4648|4672|4768|4769|4776|4778|4779)\b'
+            },
+            'application_telemetry': {
+                'http_status': r'\b[1-5][0-9]{2}\b',
+                'api_endpoint': r'/api/[a-zA-Z0-9/_-]+',
+                'url_path': r'https?://[^\s]+'
+            },
+            'cloud_infrastructure': {
+                'aws_instance': r'\bi-[0-9a-f]{8,17}\b',
+                'aws_volume': r'\bvol-[0-9a-f]{8,17}\b',
+                'region_code': r'\b(?:us|eu|ap|ca)-(?:east|west|central|north|south)-[0-9][a-z]?\b'
+            }
+        }
+        self.industry_engine = IndustryPatternEngine()
+    
+    def quantum_extract_enhanced(self, data_series, source_ref: str):
+        base_detections = self.quantum_extract(data_series, source_ref)
+        industry_context = self.industry_engine.detect_industry_context(base_detections)
+        enhanced_detections = self.industry_engine.enhance_detections_with_industry_context(
+            base_detections, industry_context
+        )
+        return enhanced_detections, industry_context
