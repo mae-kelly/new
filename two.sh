@@ -1,129 +1,66 @@
 #!/bin/bash
 
-cat > fix_license_classifiers.sh << 'EOF'
+cat > setup_mac_docker_compose.sh << 'EOF'
 #!/bin/bash
 
-echo "🔧 Fixing License Classifier Issues"
-echo "==================================="
+echo "🍎 Mac Docker Compose Setup + License Fix"
+echo "=========================================="
 
-echo "Step 1: Creating requirements.txt with packages that have modern license classifiers..."
-cat > requirements.txt << 'REQS'
-# Core web framework - modern license formats
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
+echo "Step 1: Installing Docker Compose on Mac..."
 
-# Google Cloud - official packages with proper licensing
-google-cloud-bigquery==3.12.0
-google-cloud-resource-manager==1.10.4
-google-auth==2.23.4
+# Check if Homebrew is installed
+if ! command -v brew &> /dev/null; then
+    echo "Installing Homebrew first..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    
+    # Add Homebrew to PATH for Apple Silicon Macs
+    if [[ $(uname -m) == 'arm64' ]]; then
+        echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+    fi
+fi
 
-# Security - avoid older bcrypt versions with license issues
-PyJWT==2.8.0
-passlib[bcrypt]==1.7.4
+# Install Docker and Docker Compose
+echo "Installing Docker and Docker Compose..."
+brew install --cask docker
+brew install docker-compose
 
-# Database - modern DuckDB
-duckdb==0.9.2
+# Start Docker Desktop
+echo "Starting Docker Desktop..."
+open /Applications/Docker.app
 
-# Data validation - Pydantic v2 with SPDX
-pydantic[email]==2.5.0
+echo "Waiting for Docker to start..."
+sleep 10
 
-# Configuration
-python-dotenv==1.0.0
+# Wait for Docker daemon
+echo "Waiting for Docker daemon..."
+while ! docker info >/dev/null 2>&1; do
+    echo "  Docker not ready yet, waiting..."
+    sleep 5
+done
 
-# Logging - structlog has proper licensing
-structlog==23.2.0
+echo "✅ Docker is running"
 
-# HTTP client
-httpx==0.25.2
+# Verify installation
+echo "Verifying Docker Compose installation..."
+docker-compose --version
+docker compose version
 
-# Data processing - use newer versions with SPDX
-pandas==2.1.4
-numpy==1.25.2
+echo "Step 2: Creating license-compliant project structure..."
 
-# Caching
-redis==5.0.1
-
-# Monitoring
-prometheus-client==0.19.0
-
-# System monitoring
-psutil==5.9.6
-REQS
-
-echo "Step 2: Creating setup.py with SPDX license expression..."
-cat > setup.py << 'SETUP'
-from setuptools import setup, find_packages
-
-setup(
-    name="ao1-scanner",
-    version="1.0.0",
-    description="AO1 BigQuery Visibility Scanner",
-    long_description="Enterprise BigQuery scanner for AO1 security visibility assessment",
-    author="Security Team",
-    author_email="security@company.com",
-    license="MIT",  # SPDX expression
-    license_files=["LICENSE"],
-    packages=find_packages(),
-    install_requires=[
-        "fastapi>=0.104.0",
-        "uvicorn[standard]>=0.24.0",
-        "google-cloud-bigquery>=3.12.0",
-        "google-cloud-resource-manager>=1.10.0",
-        "google-auth>=2.23.0",
-        "PyJWT>=2.8.0",
-        "passlib[bcrypt]>=1.7.4",
-        "duckdb>=0.9.0",
-        "pydantic[email]>=2.5.0",
-        "python-dotenv>=1.0.0",
-        "structlog>=23.2.0",
-        "httpx>=0.25.0",
-        "pandas>=2.1.0",
-        "numpy>=1.25.0",
-        "redis>=5.0.0",
-        "prometheus-client>=0.19.0",
-        "psutil>=5.9.0",
-    ],
-    python_requires=">=3.11",
-    classifiers=[
-        "Development Status :: 4 - Beta",
-        "Intended Audience :: System Administrators",
-        "Topic :: Security",
-        "Topic :: System :: Monitoring",
-        "License :: OSI Approved :: MIT License",  # Keep for compatibility
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.11",
-        "Operating System :: OS Independent",
-    ],
-    project_urls={
-        "Source": "https://github.com/company/ao1-scanner",
-        "Documentation": "https://docs.company.com/ao1-scanner",
-    },
-)
-SETUP
-
-echo "Step 3: Creating pyproject.toml with modern SPDX license..."
+# Create pyproject.toml with SPDX license expression
 cat > pyproject.toml << 'TOML'
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "ao1-scanner"
 version = "1.0.0"
 description = "AO1 BigQuery Visibility Scanner"
-readme = "README.md"
-license = {text = "MIT"}  # SPDX format
+license = {text = "MIT"}
 authors = [
-    {name = "Security Team", email = "security@company.com"}
-]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: System Administrators", 
-    "Topic :: Security",
-    "Topic :: System :: Monitoring",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Operating System :: OS Independent",
+    {name = "AO1 Team", email = "team@company.com"}
 ]
 requires-python = ">=3.11"
 dependencies = [
@@ -133,129 +70,79 @@ dependencies = [
     "google-cloud-resource-manager>=1.10.0",
     "google-auth>=2.23.0",
     "PyJWT>=2.8.0",
-    "passlib[bcrypt]>=1.7.4",
     "duckdb>=0.9.0",
     "pydantic[email]>=2.5.0",
     "python-dotenv>=1.0.0",
     "structlog>=23.2.0",
     "httpx>=0.25.0",
-    "pandas>=2.1.0",
-    "numpy>=1.25.0",
     "redis>=5.0.0",
-    "prometheus-client>=0.19.0",
-    "psutil>=5.9.0",
 ]
-
-[project.urls]
-Homepage = "https://github.com/company/ao1-scanner"
-Documentation = "https://docs.company.com/ao1-scanner"
-Repository = "https://github.com/company/ao1-scanner"
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["ao1_scanner*"]
-exclude = ["tests*"]
 TOML
 
-echo "Step 4: Creating LICENSE file with MIT license..."
-cat > LICENSE << 'LICENSE'
-MIT License
+# Create requirements.txt without problematic license classifiers
+cat > requirements.txt << 'REQS'
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+google-cloud-bigquery==3.12.0
+google-cloud-resource-manager==1.10.4
+google-auth==2.23.4
+PyJWT==2.8.0
+duckdb==0.9.2
+pydantic[email]==2.5.0
+python-dotenv==1.0.0
+structlog==23.2.0
+httpx==0.25.2
+redis==5.0.1
+REQS
 
-Copyright (c) 2025 AO1 Scanner Team
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-LICENSE
-
-echo "Step 5: Creating Dockerfile that avoids license classifier issues..."
-cat > Dockerfile.license-fixed << 'DOCKERFILE'
+# Create Dockerfile optimized for Mac
+cat > Dockerfile << 'DOCKERFILE'
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
-ENV PIP_NO_WARN_SCRIPT_LOCATION=0
+ENV PIP_NO_WARN_SCRIPT_LOCATION=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    build-essential \
     curl \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip and build tools to latest versions that handle SPDX
-RUN pip install --no-cache-dir --upgrade \
-    pip>=23.0 \
-    setuptools>=68.0 \
-    wheel>=0.41.0 \
-    build>=0.10.0
+# Upgrade pip and setuptools to handle SPDX licenses
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Set pip configuration to suppress license warnings
-RUN pip config set global.disable-pip-version-check true
-RUN pip config set global.no-warn-script-location true
-
-# Copy project files
-COPY pyproject.toml setup.py LICENSE ./
+# Copy project files with SPDX license
+COPY pyproject.toml .
 COPY requirements.txt .
 
-# Install dependencies with modern pip that handles SPDX properly
-RUN pip install --no-cache-dir --upgrade -r requirements.txt
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application
 COPY . .
 
 # Create directories
 RUN mkdir -p data outputs logs credentials results
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
 EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
 CMD ["python", "run_server.py"]
 DOCKERFILE
 
-echo "Step 6: Creating alternative minimal requirements (no license issues)..."
-cat > requirements.minimal.txt << 'REQS'
-# Minimal set avoiding packages with license classifier issues
-fastapi==0.104.1
-uvicorn==0.24.0
-google-cloud-bigquery==3.12.0
-google-auth==2.23.4
-pydantic==2.5.0
-python-dotenv==1.0.0
-duckdb==0.9.2
-structlog==23.2.0
-httpx==0.25.2
-# Skip problematic packages: bcrypt, pandas, numpy, etc.
-REQS
-
-echo "Step 7: Creating docker-compose with license-fixed build..."
-cat > docker-compose.license-fixed.yml << 'YAML'
+# Create docker-compose.yml for Mac
+cat > docker-compose.yml << 'YAML'
 version: '3.8'
 
 services:
   ao1-scanner:
-    build:
-      context: .
-      dockerfile: Dockerfile.license-fixed
+    build: .
     ports:
       - "${PORT:-8000}:8000"
     environment:
@@ -266,11 +153,11 @@ services:
     env_file:
       - .env
     volumes:
-      - ./data:/app/data
-      - ./outputs:/app/outputs
-      - ./logs:/app/logs
-      - ./credentials:/app/credentials
-      - ./results:/app/results
+      - ./data:/app/data:delegated
+      - ./outputs:/app/outputs:delegated
+      - ./logs:/app/logs:delegated
+      - ./credentials:/app/credentials:ro
+      - ./results:/app/results:delegated
     depends_on:
       redis:
         condition: service_healthy
@@ -293,27 +180,70 @@ volumes:
   redis-data:
 YAML
 
-echo "✅ License classifier fixes applied"
+# Create .env template
+if [ ! -f ".env" ]; then
+    cat > .env << 'ENV'
+# BigQuery Credentials - EDIT WITH YOUR VALUES
+BIGQUERY_PROJECT_ID=your-project-id
+BIGQUERY_CLIENT_EMAIL=scanner@your-project.iam.gserviceaccount.com
+BIGQUERY_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nyour-private-key-here\n-----END PRIVATE KEY-----"
+BIGQUERY_CLIENT_ID=your-client-id
+BIGQUERY_PRIVATE_KEY_ID=your-private-key-id
+BIGQUERY_TYPE=service_account
+BIGQUERY_AUTH_URI=https://accounts.google.com/o/oauth2/auth
+BIGQUERY_TOKEN_URI=https://oauth2.googleapis.com/token
+BIGQUERY_AUTH_PROVIDER_X509_CERT_URL=https://www.googleapis.com/oauth2/v1/certs
+BIGQUERY_CLIENT_X509_CERT_URL=https://www.googleapis.com/robot/v1/metadata/x509/scanner%40your-project.iam.gserviceaccount.com
+
+# App Settings
+PORT=8000
+HOST=0.0.0.0
+DATABASE_PATH=scanner.duckdb
+JWT_SECRET_KEY=auto-generated
+ENVIRONMENT=production
+LOG_LEVEL=INFO
+ENV
+
+    echo "✅ Created .env template - EDIT WITH YOUR BIGQUERY CREDENTIALS"
+fi
+
+echo "✅ Mac Docker Compose setup complete!"
+echo ""
+echo "Next steps:"
+echo "1. Edit .env with your BigQuery credentials"
+echo "2. Run: ./deploy_mac.sh"
 EOF
 
-cat > deploy_with_license_fix.sh << 'EOF'
+cat > deploy_mac.sh << 'EOF'
 #!/bin/bash
 
-echo "🚀 Deploy with License Classifier Fix"
-echo "====================================="
+echo "🚀 Deploy AO1 Scanner on Mac"
+echo "============================"
 
-# Apply license fixes
-./fix_license_classifiers.sh
+# Check if Docker is running
+if ! docker info >/dev/null 2>&1; then
+    echo "❌ Docker is not running. Starting Docker Desktop..."
+    open /Applications/Docker.app
+    
+    echo "Waiting for Docker to start..."
+    while ! docker info >/dev/null 2>&1; do
+        sleep 5
+        echo "  Still waiting for Docker..."
+    done
+fi
 
+echo "✅ Docker is running"
+
+# Check .env
 if [ ! -f ".env" ]; then
-    echo "❌ Need .env file. Run ./create_env_template.sh first"
+    echo "❌ .env file not found. Run ./setup_mac_docker_compose.sh first"
     exit 1
 fi
 
 source .env
 
 if [ "$BIGQUERY_PROJECT_ID" = "your-project-id" ]; then
-    echo "❌ Edit .env with real BigQuery credentials"
+    echo "❌ Please edit .env with your actual BigQuery credentials"
     exit 1
 fi
 
@@ -324,7 +254,7 @@ cat > credentials/bigquery-service-account.json << JSON
 {
   "type": "$BIGQUERY_TYPE",
   "project_id": "$BIGQUERY_PROJECT_ID",
-  "private_key_id": "$BIGQUERY_PRIVATE_KEY_ID", 
+  "private_key_id": "$BIGQUERY_PRIVATE_KEY_ID",
   "private_key": "$BIGQUERY_PRIVATE_KEY",
   "client_email": "$BIGQUERY_CLIENT_EMAIL",
   "client_id": "$BIGQUERY_CLIENT_ID",
@@ -335,49 +265,72 @@ cat > credentials/bigquery-service-account.json << JSON
 }
 JSON
 
-echo ""
-echo "Choose build approach:"
-echo "1. Full requirements (with license fix)"
-echo "2. Minimal requirements (avoid problematic packages)"
-echo ""
-read -p "Enter choice (1-2): " choice
-
-if [ "$choice" = "2" ]; then
-    echo "Using minimal requirements..."
-    cp requirements.minimal.txt requirements.txt
-fi
-
-echo "Building and deploying..."
-docker-compose -f docker-compose.license-fixed.yml up --build -d
+echo "Building and starting with Docker Compose..."
+docker-compose down 2>/dev/null || true
+docker-compose up --build -d
 
 echo "Waiting for services..."
 sleep 15
 
-if curl -f http://localhost:${PORT:-8000}/health >/dev/null 2>&1; then
-    echo "✅ Success! No license classifier warnings"
-    echo "📊 AO1 Scanner: http://localhost:${PORT:-8000}"
+echo "Testing AO1 Scanner..."
+for i in {1..20}; do
+    if curl -f http://localhost:${PORT:-8000}/health >/dev/null 2>&1; then
+        echo "✅ AO1 Scanner is running!"
+        break
+    else
+        echo "⏳ Waiting for scanner... (attempt $i/20)"
+        sleep 3
+    fi
+done
+
+# Test endpoints
+echo ""
+echo "Testing endpoints..."
+API_URL="http://localhost:${PORT:-8000}"
+
+if curl -f "$API_URL/health" >/dev/null 2>&1; then
+    echo "✅ Health check: Working"
 else
-    echo "❌ Check logs: docker-compose -f docker-compose.license-fixed.yml logs"
+    echo "❌ Health check: Failed"
 fi
+
+if curl -f "$API_URL/dashboard/stats" >/dev/null 2>&1; then
+    echo "✅ Dashboard: Working"
+else
+    echo "❌ Dashboard: Failed"
+fi
+
+echo ""
+echo "🎉 Deployment Complete!"
+echo "======================"
+echo ""
+echo "📊 Access Points:"
+echo "• AO1 Scanner: http://localhost:${PORT:-8000}"
+echo "• Health Check: http://localhost:${PORT:-8000}/health"
+echo "• Dashboard: http://localhost:${PORT:-8000}/dashboard/stats"
+echo ""
+echo "🔧 Management:"
+echo "• Logs: docker-compose logs -f"
+echo "• Stop: docker-compose down"
+echo "• Restart: docker-compose restart"
+echo ""
+echo "No license classifier warnings! ✅"
 EOF
 
-chmod +x fix_license_classifiers.sh deploy_with_license_fix.sh
+chmod +x setup_mac_docker_compose.sh deploy_mac.sh
 
-echo "✅ License classifier fix created!"
+echo "✅ Mac Docker Compose + License Fix Created!"
 echo ""
-echo "🔧 To fix the MIT license OSI classifier warnings:"
+echo "🍎 Two-step process for Mac:"
 echo ""
-echo "1. Apply the license fixes:"
-echo "   ./fix_license_classifiers.sh"
+echo "1. Install Docker Compose and fix licenses:"
+echo "   ./setup_mac_docker_compose.sh"
 echo ""
-echo "2. Deploy with fixes:"
-echo "   ./deploy_with_license_fix.sh"
+echo "2. Edit .env with your BigQuery credentials, then:"
+echo "   ./deploy_mac.sh"
 echo ""
-echo "This creates:"
-echo "• pyproject.toml with SPDX license format"
-echo "• Updated requirements.txt avoiding problematic packages"
-echo "• Modern pip configuration"
-echo "• LICENSE file"
-echo "• Minimal requirements option"
-echo ""
-echo "The license classifier warnings should be eliminated!"
+echo "This will:"
+echo "• Install Docker & Docker Compose via Homebrew"
+echo "• Create SPDX-compliant project structure"
+echo "• Remove MIT license OSI classifier warnings"
+echo "• Deploy with Mac-optimized Docker Compose"
