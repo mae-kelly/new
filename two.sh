@@ -1,126 +1,50 @@
 #!/bin/bash
 
-cat > setup_mac_docker_compose.sh << 'EOF'
+cat > use_local_ssl_cert.sh << 'EOF'
 #!/bin/bash
 
-echo "🍎 Mac Docker Compose Setup + License Fix"
-echo "=========================================="
+echo "🔐 Using Local SSL Certificate"
+echo "=============================="
 
-echo "Step 1: Installing Docker Compose on Mac..."
-
-# Check if Homebrew is installed
-if ! command -v brew &> /dev/null; then
-    echo "Installing Homebrew first..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    
-    # Add Homebrew to PATH for Apple Silicon Macs
-    if [[ $(uname -m) == 'arm64' ]]; then
-        echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-    fi
+# Check if ssl.cert exists
+if [ ! -f "ssl/ssl.cert" ]; then
+    echo "❌ SSL certificate not found at ssl/ssl.cert"
+    echo "Please ensure your certificate is at: ssl/ssl.cert"
+    exit 1
 fi
 
-# Install Docker and Docker Compose
-echo "Installing Docker and Docker Compose..."
-brew install --cask docker
-brew install docker-compose
+echo "✅ Found SSL certificate at ssl/ssl.cert"
 
-# Start Docker Desktop
-echo "Starting Docker Desktop..."
-open /Applications/Docker.app
-
-echo "Waiting for Docker to start..."
-sleep 10
-
-# Wait for Docker daemon
-echo "Waiting for Docker daemon..."
-while ! docker info >/dev/null 2>&1; do
-    echo "  Docker not ready yet, waiting..."
-    sleep 5
-done
-
-echo "✅ Docker is running"
-
-# Verify installation
-echo "Verifying Docker Compose installation..."
-docker-compose --version
-docker compose version
-
-echo "Step 2: Creating license-compliant project structure..."
-
-# Create pyproject.toml with SPDX license expression
-cat > pyproject.toml << 'TOML'
-[build-system]
-requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "ao1-scanner"
-version = "1.0.0"
-description = "AO1 BigQuery Visibility Scanner"
-license = {text = "MIT"}
-authors = [
-    {name = "AO1 Team", email = "team@company.com"}
-]
-requires-python = ">=3.11"
-dependencies = [
-    "fastapi>=0.104.0",
-    "uvicorn[standard]>=0.24.0",
-    "google-cloud-bigquery>=3.12.0",
-    "google-cloud-resource-manager>=1.10.0",
-    "google-auth>=2.23.0",
-    "PyJWT>=2.8.0",
-    "duckdb>=0.9.0",
-    "pydantic[email]>=2.5.0",
-    "python-dotenv>=1.0.0",
-    "structlog>=23.2.0",
-    "httpx>=0.25.0",
-    "redis>=5.0.0",
-]
-TOML
-
-# Create requirements.txt without problematic license classifiers
-cat > requirements.txt << 'REQS'
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-google-cloud-bigquery==3.12.0
-google-cloud-resource-manager==1.10.4
-google-auth==2.23.4
-PyJWT==2.8.0
-duckdb==0.9.2
-pydantic[email]==2.5.0
-python-dotenv==1.0.0
-structlog==23.2.0
-httpx==0.25.2
-redis==5.0.1
-REQS
-
-# Create Dockerfile optimized for Mac
+echo "Step 1: Creating Dockerfile with local SSL certificate..."
 cat > Dockerfile << 'DOCKERFILE'
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
-ENV PIP_NO_WARN_SCRIPT_LOCATION=1
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
-    build-essential \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip and setuptools to handle SPDX licenses
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+# Copy local SSL certificate
+COPY ssl/ssl.cert /usr/local/share/ca-certificates/ssl.crt
 
-# Copy project files with SPDX license
-COPY pyproject.toml .
+# Update certificate store with local certificate
+RUN update-ca-certificates
+
+# Set certificate environment variables
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+
+# Copy and install requirements
 COPY requirements.txt .
-
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip
+RUN pip install -r requirements.txt
 
 # Copy application
 COPY . .
@@ -136,7 +60,7 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 CMD ["python", "run_server.py"]
 DOCKERFILE
 
-# Create docker-compose.yml for Mac
+echo "Step 2: Creating docker-compose.yml with SSL certificate..."
 cat > docker-compose.yml << 'YAML'
 version: '3.8'
 
@@ -148,16 +72,19 @@ services:
     environment:
       - DATABASE_PATH=/app/data/scanner.duckdb
       - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/bigquery-service-account.json
+      - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
       - ENVIRONMENT=production
       - LOG_LEVEL=INFO
     env_file:
       - .env
     volumes:
-      - ./data:/app/data:delegated
-      - ./outputs:/app/outputs:delegated
-      - ./logs:/app/logs:delegated
-      - ./credentials:/app/credentials:ro
-      - ./results:/app/results:delegated
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+      - ./logs:/app/logs
+      - ./credentials:/app/credentials
+      - ./results:/app/results
+      - ./ssl:/app/ssl:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -180,70 +107,81 @@ volumes:
   redis-data:
 YAML
 
-# Create .env template
-if [ ! -f ".env" ]; then
-    cat > .env << 'ENV'
-# BigQuery Credentials - EDIT WITH YOUR VALUES
-BIGQUERY_PROJECT_ID=your-project-id
-BIGQUERY_CLIENT_EMAIL=scanner@your-project.iam.gserviceaccount.com
-BIGQUERY_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nyour-private-key-here\n-----END PRIVATE KEY-----"
-BIGQUERY_CLIENT_ID=your-client-id
-BIGQUERY_PRIVATE_KEY_ID=your-private-key-id
-BIGQUERY_TYPE=service_account
-BIGQUERY_AUTH_URI=https://accounts.google.com/o/oauth2/auth
-BIGQUERY_TOKEN_URI=https://oauth2.googleapis.com/token
-BIGQUERY_AUTH_PROVIDER_X509_CERT_URL=https://www.googleapis.com/oauth2/v1/certs
-BIGQUERY_CLIENT_X509_CERT_URL=https://www.googleapis.com/robot/v1/metadata/x509/scanner%40your-project.iam.gserviceaccount.com
+echo "Step 3: Creating .dockerignore to include SSL certificate..."
+cat > .dockerignore << 'IGNORE'
+.git
+.gitignore
+README.md
+.dockerignore
+.env.example
+__pycache__
+*.pyc
+.pytest_cache
+.coverage
+*.log
+venv
+.venv
+outputs
+logs
+results
+data
+*.duckdb
+node_modules
+.DS_Store
 
-# App Settings
-PORT=8000
-HOST=0.0.0.0
-DATABASE_PATH=scanner.duckdb
-JWT_SECRET_KEY=auto-generated
-ENVIRONMENT=production
-LOG_LEVEL=INFO
-ENV
+# Keep SSL certificate
+!ssl/
+!ssl/ssl.cert
+IGNORE
 
-    echo "✅ Created .env template - EDIT WITH YOUR BIGQUERY CREDENTIALS"
-fi
+echo "Step 4: Creating requirements.txt with SSL-compatible packages..."
+cat > requirements.txt << 'REQS'
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+google-cloud-bigquery==3.12.0
+google-cloud-resource-manager==1.10.4
+google-auth==2.23.4
+PyJWT==2.8.0
+duckdb==0.9.2
+pydantic[email]==2.5.0
+python-dotenv==1.0.0
+structlog==23.2.0
+httpx==0.25.2
+redis==5.0.1
+certifi==2023.11.17
+REQS
 
-echo "✅ Mac Docker Compose setup complete!"
-echo ""
-echo "Next steps:"
-echo "1. Edit .env with your BigQuery credentials"
-echo "2. Run: ./deploy_mac.sh"
+echo "✅ Docker configuration updated to use local SSL certificate"
 EOF
 
-cat > deploy_mac.sh << 'EOF'
+cat > deploy_with_ssl_cert.sh << 'EOF'
 #!/bin/bash
 
-echo "🚀 Deploy AO1 Scanner on Mac"
-echo "============================"
+echo "🚀 Deploy with Local SSL Certificate"
+echo "===================================="
 
-# Check if Docker is running
-if ! docker info >/dev/null 2>&1; then
-    echo "❌ Docker is not running. Starting Docker Desktop..."
-    open /Applications/Docker.app
-    
-    echo "Waiting for Docker to start..."
-    while ! docker info >/dev/null 2>&1; do
-        sleep 5
-        echo "  Still waiting for Docker..."
-    done
+# Check SSL certificate
+if [ ! -f "ssl/ssl.cert" ]; then
+    echo "❌ SSL certificate not found at ssl/ssl.cert"
+    echo "Please place your SSL certificate at: ssl/ssl.cert"
+    exit 1
 fi
 
-echo "✅ Docker is running"
+echo "✅ Using SSL certificate: ssl/ssl.cert"
+
+# Apply SSL configuration
+./use_local_ssl_cert.sh
 
 # Check .env
 if [ ! -f ".env" ]; then
-    echo "❌ .env file not found. Run ./setup_mac_docker_compose.sh first"
+    echo "❌ .env file not found"
     exit 1
 fi
 
 source .env
 
 if [ "$BIGQUERY_PROJECT_ID" = "your-project-id" ]; then
-    echo "❌ Please edit .env with your actual BigQuery credentials"
+    echo "❌ Edit .env with your BigQuery credentials"
     exit 1
 fi
 
@@ -265,72 +203,122 @@ cat > credentials/bigquery-service-account.json << JSON
 }
 JSON
 
-echo "Building and starting with Docker Compose..."
+echo "Building with local SSL certificate..."
 docker-compose down 2>/dev/null || true
 docker-compose up --build -d
 
 echo "Waiting for services..."
 sleep 15
 
+echo "Testing SSL certificate configuration..."
+if docker-compose exec -T ao1-scanner curl -s https://www.google.com >/dev/null 2>&1; then
+    echo "✅ SSL certificate working in container"
+else
+    echo "⚠️ SSL certificate may need additional configuration"
+fi
+
 echo "Testing AO1 Scanner..."
-for i in {1..20}; do
+for i in {1..15}; do
     if curl -f http://localhost:${PORT:-8000}/health >/dev/null 2>&1; then
-        echo "✅ AO1 Scanner is running!"
+        echo "✅ AO1 Scanner is running with SSL certificate!"
         break
     else
-        echo "⏳ Waiting for scanner... (attempt $i/20)"
+        echo "⏳ Waiting for scanner... (attempt $i/15)"
         sleep 3
     fi
 done
 
-# Test endpoints
 echo ""
-echo "Testing endpoints..."
-API_URL="http://localhost:${PORT:-8000}"
-
-if curl -f "$API_URL/health" >/dev/null 2>&1; then
-    echo "✅ Health check: Working"
-else
-    echo "❌ Health check: Failed"
-fi
-
-if curl -f "$API_URL/dashboard/stats" >/dev/null 2>&1; then
-    echo "✅ Dashboard: Working"
-else
-    echo "❌ Dashboard: Failed"
-fi
-
-echo ""
-echo "🎉 Deployment Complete!"
-echo "======================"
+echo "🎉 Deployment Complete with Local SSL Certificate!"
+echo "================================================="
 echo ""
 echo "📊 Access Points:"
 echo "• AO1 Scanner: http://localhost:${PORT:-8000}"
 echo "• Health Check: http://localhost:${PORT:-8000}/health"
-echo "• Dashboard: http://localhost:${PORT:-8000}/dashboard/stats"
+echo ""
+echo "🔐 SSL Certificate:"
+echo "• Loaded from: ssl/ssl.cert"
+echo "• Added to container certificate store"
 echo ""
 echo "🔧 Management:"
 echo "• Logs: docker-compose logs -f"
 echo "• Stop: docker-compose down"
-echo "• Restart: docker-compose restart"
-echo ""
-echo "No license classifier warnings! ✅"
 EOF
 
-chmod +x setup_mac_docker_compose.sh deploy_mac.sh
+cat > verify_ssl_setup.sh << 'EOF'
+#!/bin/bash
 
-echo "✅ Mac Docker Compose + License Fix Created!"
+echo "🔍 Verifying SSL Certificate Setup"
+echo "=================================="
+
+# Check local certificate
+if [ -f "ssl/ssl.cert" ]; then
+    echo "✅ SSL certificate found: ssl/ssl.cert"
+    
+    # Show certificate info
+    echo "Certificate details:"
+    openssl x509 -in ssl/ssl.cert -text -noout 2>/dev/null | grep -E "(Subject|Issuer|Not Before|Not After)" || echo "  (Certificate details not readable)"
+else
+    echo "❌ SSL certificate not found at ssl/ssl.cert"
+fi
+
+# Check Docker configuration
+if [ -f "Dockerfile" ]; then
+    if grep -q "ssl.cert" Dockerfile; then
+        echo "✅ Dockerfile configured for SSL certificate"
+    else
+        echo "❌ Dockerfile not configured for SSL certificate"
+    fi
+fi
+
+# Check docker-compose configuration
+if [ -f "docker-compose.yml" ]; then
+    if grep -q "ssl:" docker-compose.yml; then
+        echo "✅ docker-compose.yml configured for SSL"
+    else
+        echo "❌ docker-compose.yml not configured for SSL"
+    fi
+fi
+
+# Test if container can access external HTTPS
+if docker-compose ps | grep -q "Up"; then
+    echo "Testing HTTPS connectivity from container..."
+    if docker-compose exec -T ao1-scanner curl -s --max-time 10 https://httpbin.org/get >/dev/null 2>&1; then
+        echo "✅ Container can access HTTPS with SSL certificate"
+    else
+        echo "⚠️ Container HTTPS access may have issues"
+    fi
+else
+    echo "⚠️ Containers not running - start with docker-compose up -d"
+fi
+
 echo ""
-echo "🍎 Two-step process for Mac:"
+echo "SSL Setup Status:"
+if [ -f "ssl/ssl.cert" ] && [ -f "Dockerfile" ] && grep -q "ssl.cert" Dockerfile; then
+    echo "✅ SSL certificate properly configured"
+else
+    echo "❌ SSL certificate setup incomplete"
+    echo "Run: ./use_local_ssl_cert.sh"
+fi
+EOF
+
+chmod +x use_local_ssl_cert.sh deploy_with_ssl_cert.sh verify_ssl_setup.sh
+
+echo "✅ Local SSL Certificate Setup Created!"
 echo ""
-echo "1. Install Docker Compose and fix licenses:"
-echo "   ./setup_mac_docker_compose.sh"
+echo "🔐 To use your SSL certificate at ssl/ssl.cert:"
 echo ""
-echo "2. Edit .env with your BigQuery credentials, then:"
-echo "   ./deploy_mac.sh"
+echo "1. Configure Docker for your SSL certificate:"
+echo "   ./use_local_ssl_cert.sh"
+echo ""
+echo "2. Deploy with SSL certificate:"
+echo "   ./deploy_with_ssl_cert.sh"
+echo ""
+echo "3. Verify SSL setup:"
+echo "   ./verify_ssl_setup.sh"
 echo ""
 echo "This will:"
-echo "• Install Docker & Docker Compose via Homebrew"
-echo "• Create SPDX-compliant project structure"
-echo "• Remove MIT license OSI classifier warnings"
-echo "• Deploy with Mac-optimized Docker Compose"
+echo "• Copy ssl/ssl.cert into the Docker container"
+echo "• Add it to the container's certificate store"
+echo "• Configure all Python requests to use it"
+echo "• Mount ssl/ folder as read-only volume"
