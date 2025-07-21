@@ -1,31 +1,4 @@
-def _add_working_query_to_app(self, synthesis: QuerySynthesis, row_count: int):
-        """Add working query as commented code to app.py"""
-        try:
-            # Try multiple possible locations for app.py
-            possible_paths = [
-                Path("app.py"),
-                Path("./app.py"), 
-                Path("../app.py"),
-                Path("../../app.py")
-            ]
-            
-            app_py_path = None
-            for path in possible_paths:
-                if path.exists():
-                    app_py_path = path
-                    break
-            
-            if not app_py_path:
-                # Create app.py if it doesn't exist
-                app_py_path = Path("app.py")
-                with open(app_py_path, 'w') as f:
-                    f.write("# Auto-generated app.py for AO1 queries\n")
-                logger.info(f"   📄 Created new app.py file")
-            
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            # Create the route name
-            route_name = synthesis.name.replace('#!/usr/bin/env python3
+#!/usr/bin/env python3
 
 import logging
 import pandas as pd
@@ -1121,662 +1094,28 @@ class BrilliantQueryEngine:
             fallback_strategies=[]
         )
     
-    def _build_simple_coverage_query(self):
-        sql = '''
-        select 
-            'Global Asset Coverage' as analysis_type,
-            count(distinct splunk_host) as total_splunk_assets,
-            count(distinct case when chronicle_ips is not null or chronicle_host is not null then splunk_host end) as chronicle_covered_assets,
-            count(distinct case when crowdstrike_device_hostname is not null then splunk_host end) as crowdstrike_covered_assets,
-            round((count(distinct case when chronicle_ips is not null or chronicle_host is not null then splunk_host end) * 100.0 / count(distinct splunk_host)), 2) as chronicle_coverage_percent,
-            round((count(distinct case when crowdstrike_device_hostname is not null then splunk_host end) * 100.0 / count(distinct splunk_host)), 2) as crowdstrike_coverage_percent
-        from combined
-        where splunk_host is not null
-        '''
-        
+    def _build_generic_ao1_query(self, req_name: str, description: str):
+        """Generic fallback query builder for any AO1 requirement"""
         return QuerySynthesis(
-            name='global_asset_coverage',
-            purpose='Asset coverage across security tools using actual schema',
-            sql=sql,
-            confidence=0.95,
+            name=req_name,
+            purpose=description,
+            sql=f'''
+            select 
+                '{req_name}' as metric_name,
+                '{description}' as metric_description,
+                count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) as total_assets,
+                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_assets,
+                count(distinct case when splunk_host is not null then splunk_host end) as splunk_assets,
+                count(distinct case when crowdstrike_device_hostname is not null then crowdstrike_device_hostname end) as crowdstrike_assets,
+                count(*) as total_records
+            from combined
+            where coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname) is not null
+            ''',
+            confidence=0.70,
             validation_checks=[],
             expected_ranges={},
             fallback_strategies=[]
         )
-    
-    def _build_simple_network_query(self):
-        sql = '''
-        select 
-            data_type,
-            count(distinct splunk_host) as total_assets,
-            count(distinct case when chronicle_ips is not null or chronicle_host is not null then splunk_host end) as chronicle_coverage,
-            round((count(distinct case when chronicle_ips is not null or chronicle_host is not null then splunk_host end) * 100.0 / count(distinct splunk_host)), 2) as coverage_percent
-        from combined
-        where splunk_host is not null
-        and data_type is not null
-        group by data_type
-        order by coverage_percent desc
-        '''
-        
-        return QuerySynthesis(
-            name='network_role_coverage',
-            purpose='Network coverage by data type using actual schema',
-            sql=sql,
-            confidence=0.95,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_simple_endpoint_query(self):
-        sql = '''
-        select 
-            case 
-                when lower(splunk_host) like '%win%' or lower(splunk_host) like '%pc%' then 'Windows'
-                when lower(splunk_host) like '%linux%' or lower(splunk_host) like '%unix%' then 'Linux'
-                when lower(splunk_host) like '%mac%' then 'macOS'
-                when lower(splunk_host) like '%server%' then 'Server'
-                else 'Other'
-            end as os_type,
-            count(distinct splunk_host) as total_endpoints,
-            count(distinct case when crowdstrike_device_hostname is not null then splunk_host end) as edr_covered,
-            round((count(distinct case when crowdstrike_device_hostname is not null then splunk_host end) * 100.0 / count(distinct splunk_host)), 2) as edr_coverage_percent
-        from combined
-        where splunk_host is not null
-        group by os_type
-        order by total_endpoints desc
-        '''
-        
-        return QuerySynthesis(
-            name='endpoint_role_coverage',
-            purpose='Endpoint coverage by OS type using actual schema',
-            sql=sql,
-            confidence=0.90,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_simple_agent_query(self):
-        sql = '''
-        select 
-            coalesce(crowdstrike_agent_health, 'No Agent') as agent_status,
-            count(distinct splunk_host) as asset_count,
-            round((count(distinct splunk_host) * 100.0 / (select count(distinct splunk_host) from combined where splunk_host is not null)), 2) as percent_of_total
-        from combined
-        where splunk_host is not null
-        group by agent_status
-        order by asset_count desc
-        '''
-        
-        return QuerySynthesis(
-            name='agent_health_coverage',
-            purpose='CrowdStrike agent health using actual schema',
-            sql=sql,
-            confidence=0.90,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_simple_infra_query(self):
-        sql = '''
-        select 
-            case 
-                when lower(splunk_host) like '%aws%' or lower(splunk_host) like '%ec2%' then 'AWS Cloud'
-                when lower(splunk_host) like '%azure%' then 'Azure Cloud'
-                when lower(splunk_host) like '%gcp%' or lower(splunk_host) like '%google%' then 'GCP Cloud'
-                when lower(splunk_host) like '%vm%' or lower(splunk_host) like '%virtual%' then 'Virtual'
-                when lower(splunk_host) like '%server%' then 'Server'
-                when lower(splunk_host) like '%desktop%' or lower(splunk_host) like '%pc%' then 'Desktop'
-                else 'On-Premise'
-            end as infrastructure_type,
-            count(distinct splunk_host) as asset_count,
-            count(distinct case when chronicle_ips is not null or chronicle_host is not null then splunk_host end) as chronicle_coverage,
-            count(distinct case when crowdstrike_device_hostname is not null then splunk_host end) as edr_coverage,
-            round((count(distinct case when chronicle_ips is not null or chronicle_host is not null then splunk_host end) * 100.0 / count(distinct splunk_host)), 2) as chronicle_coverage_percent
-        from combined
-        where splunk_host is not null
-        group by infrastructure_type
-        order by asset_count desc
-        '''
-        
-        return QuerySynthesis(
-            name='infrastructure_classification',
-            purpose='Infrastructure classification using actual schema',
-            sql=sql,
-            confidence=0.85,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _get_best_host_field(self):
-        for field_ref, intel in self.field_intelligence.items():
-            if intel.primary_type == 'host_identity' and intel.confidence > 0.5:
-                return field_ref
-        return None
-    
-    def _get_best_network_field(self):
-        for field_ref, intel in self.field_intelligence.items():
-            if intel.primary_type == 'network_logs' and intel.confidence > 0.3:
-                return field_ref
-        return None
-    
-    def _find_best_field(self, pattern_type, min_confidence=0.3):
-        candidates = []
-        for field_ref, intel in self.field_intelligence.items():
-            if intel.primary_type == pattern_type and intel.confidence >= min_confidence:
-                candidates.append((field_ref, intel))
-        
-        if candidates:
-            return max(candidates, key=lambda x: x[1].confidence)
-        return None, None
-    
-    def _synthesize_global_coverage(self):
-        host_field_ref, host_intel = self._find_best_field('host_identity')
-        
-        if not host_field_ref:
-            host_field_ref = self._create_synthetic_host_field()
-        
-        if not host_field_ref:
-            for field_ref, intel in self.field_intelligence.items():
-                if intel.confidence > 0.5:
-                    host_field_ref = field_ref
-                    host_intel = intel
-                    break
-        
-        if not host_field_ref:
-            return None
-        
-        table, column = host_field_ref.split('.', 1)
-        
-        sql = f'''
-        SELECT 
-            COUNT(DISTINCT "{column}") as total_assets,
-            COUNT(DISTINCT CASE WHEN chronicle_device_hostname IS NOT NULL THEN "{column}" END) as chronicle_coverage,
-            COUNT(DISTINCT CASE WHEN crowdstrike_device_hostname IS NOT NULL THEN "{column}" END) as crowdstrike_coverage,
-            COUNT(DISTINCT CASE WHEN splunk_host IS NOT NULL THEN "{column}" END) as splunk_coverage,
-            ROUND(
-                CAST(COUNT(DISTINCT CASE WHEN 
-                    chronicle_device_hostname IS NOT NULL OR 
-                    crowdstrike_device_hostname IS NOT NULL OR 
-                    splunk_host IS NOT NULL 
-                THEN "{column}" END) AS FLOAT) * 100.0 / 
-                CAST(COUNT(DISTINCT "{column}") AS FLOAT), 2
-            ) as overall_coverage_pct
-        FROM "{table}"
-        WHERE "{column}" IS NOT NULL 
-        AND "{column}" != ''
-        '''
-        
-        confidence = host_intel.confidence if host_intel else 0.7
-        
-        return QuerySynthesis(
-            name='global_asset_coverage',
-            purpose='Comprehensive asset visibility coverage analysis across all security tools',
-            sql=sql,
-            confidence=confidence,
-            validation_checks=['total_assets > 0'],
-            expected_ranges={'overall_coverage_pct': (0, 100), 'total_assets': (1, 1000000)},
-            fallback_strategies=['synthetic_host_creation', 'ip_based_aggregation']
-        )
-    
-    def _synthesize_network_coverage(self):
-        host_field_ref, host_intel = self._find_best_field('host_identity')
-        network_field_ref, network_intel = self._find_best_field('network_logs')
-        
-        if not host_field_ref:
-            host_field_ref = self._find_alternative_identifier()
-        
-        if not network_field_ref:
-            network_field_ref = self._synthesize_network_classification()
-        
-        if not host_field_ref or not network_field_ref:
-            return None
-        
-        host_table, host_column = host_field_ref.split('.', 1)
-        net_table, net_column = network_field_ref.split('.', 1)
-        
-        sql = f'''
-        WITH network_classifications AS (
-            SELECT 
-                "{host_column}" as asset_id,
-                "{net_column}" as log_type,
-                CASE 
-                    WHEN LOWER("{net_column}") LIKE '%firewall%' THEN 'Firewall'
-                    WHEN LOWER("{net_column}") LIKE '%proxy%' THEN 'Proxy'
-                    WHEN LOWER("{net_column}") LIKE '%dns%' THEN 'DNS'
-                    WHEN LOWER("{net_column}") LIKE '%ids%' OR LOWER("{net_column}") LIKE '%ips%' THEN 'IDS/IPS'
-                    WHEN LOWER("{net_column}") LIKE '%ndr%' THEN 'NDR'
-                    WHEN LOWER("{net_column}") LIKE '%waf%' THEN 'WAF'
-                    WHEN LOWER("{net_column}") LIKE '%traffic%' THEN 'Traffic Analysis'
-                    ELSE 'Other Network'
-                END as network_role,
-                COUNT(*) as log_count
-            FROM "{net_table}"
-            WHERE "{host_column}" IS NOT NULL 
-            AND "{net_column}" IS NOT NULL
-            GROUP BY "{host_column}", "{net_column}"
-        ),
-        role_coverage AS (
-            SELECT 
-                network_role,
-                COUNT(DISTINCT asset_id) as unique_assets,
-                SUM(log_count) as total_logs,
-                AVG(log_count) as avg_logs_per_asset
-            FROM network_classifications
-            WHERE network_role != 'Other Network'
-            GROUP BY network_role
-        ),
-        total_network_assets AS (
-            SELECT COUNT(DISTINCT asset_id) as total_assets
-            FROM network_classifications
-        )
-        SELECT 
-            rc.network_role,
-            rc.unique_assets,
-            rc.total_logs,
-            ROUND(rc.avg_logs_per_asset, 2) as avg_logs_per_asset,
-            ROUND(CAST(rc.unique_assets AS FLOAT) / CAST(tna.total_assets AS FLOAT) * 100, 2) as coverage_percentage
-        FROM role_coverage rc
-        CROSS JOIN total_network_assets tna
-        ORDER BY rc.unique_assets DESC
-        '''
-        
-        confidence = (host_intel.confidence if host_intel else 0.5) * (network_intel.confidence if network_intel else 0.5)
-        
-        return QuerySynthesis(
-            name='network_role_coverage',
-            purpose='Network security role coverage analysis by technology type',
-            sql=sql,
-            confidence=confidence,
-            validation_checks=['unique_assets > 0', 'coverage_percentage <= 100'],
-            expected_ranges={'coverage_percentage': (0, 100), 'unique_assets': (1, 100000)},
-            fallback_strategies=['log_type_synthesis', 'source_based_classification']
-        )
-    
-    def _synthesize_endpoint_coverage(self):
-        host_field_ref, host_intel = self._find_best_field('host_identity')
-        endpoint_field_ref, endpoint_intel = self._find_best_field('endpoint_logs')
-        
-        if not host_field_ref:
-            host_field_ref = self._find_alternative_identifier()
-        
-        if not endpoint_field_ref:
-            endpoint_field_ref = self._synthesize_endpoint_classification()
-        
-        if not host_field_ref:
-            return None
-        
-        host_table, host_column = host_field_ref.split('.', 1)
-        
-        if endpoint_field_ref:
-            end_table, end_column = endpoint_field_ref.split('.', 1)
-            endpoint_classification = f'"{end_column}"'
-        else:
-            endpoint_classification = '''
-            CASE 
-                WHEN LOWER("{host_column}") LIKE '%win%' OR LOWER("{host_column}") LIKE '%pc%' THEN 'Windows'
-                WHEN LOWER("{host_column}") LIKE '%linux%' OR LOWER("{host_column}") LIKE '%unix%' THEN 'Linux'
-                WHEN LOWER("{host_column}") LIKE '%mac%' THEN 'macOS'
-                WHEN LOWER("{host_column}") LIKE '%server%' THEN 'Server'
-                ELSE 'Unknown OS'
-            END'''
-        
-        sql = f'''
-        WITH endpoint_universe AS (
-            SELECT DISTINCT 
-                "{host_column}" as asset_id,
-                {endpoint_classification} as os_type
-            FROM "{host_table}"
-            WHERE "{host_column}" IS NOT NULL
-        ),
-        edr_coverage AS (
-            SELECT 
-                eu.asset_id,
-                eu.os_type,
-                CASE WHEN c.crowdstrike_device_hostname IS NOT NULL THEN 1 ELSE 0 END as has_edr,
-                COALESCE(c.crowdstrike_agent_health, 'Unknown') as edr_health
-            FROM endpoint_universe eu
-            LEFT JOIN "{host_table}" c ON eu.asset_id = c."{host_column}"
-        ),
-        endpoint_summary AS (
-            SELECT 
-                os_type,
-                COUNT(*) as total_endpoints,
-                SUM(has_edr) as edr_deployed,
-                SUM(CASE WHEN edr_health = 'Healthy' THEN 1 ELSE 0 END) as healthy_agents,
-                SUM(CASE WHEN edr_health = 'Unhealthy' THEN 1 ELSE 0 END) as unhealthy_agents
-            FROM edr_coverage
-            GROUP BY os_type
-        )
-        SELECT 
-            os_type,
-            total_endpoints,
-            edr_deployed,
-            healthy_agents,
-            unhealthy_agents,
-            ROUND(CAST(edr_deployed AS FLOAT) / CAST(total_endpoints AS FLOAT) * 100, 2) as edr_coverage_pct,
-            ROUND(CAST(healthy_agents AS FLOAT) / CAST(edr_deployed AS FLOAT) * 100, 2) as health_rate_pct
-        FROM endpoint_summary
-        WHERE total_endpoints > 0
-        ORDER BY total_endpoints DESC
-        '''
-        
-        confidence = host_intel.confidence if host_intel else 0.4
-        if endpoint_intel:
-            confidence = (confidence + endpoint_intel.confidence) / 2
-        
-        return QuerySynthesis(
-            name='endpoint_role_coverage',
-            purpose='Endpoint security coverage and health analysis by OS type',
-            sql=sql,
-            confidence=confidence,
-            validation_checks=['total_endpoints > 0', 'edr_coverage_pct <= 100'],
-            expected_ranges={'edr_coverage_pct': (0, 100), 'health_rate_pct': (0, 100)},
-            fallback_strategies=['os_inference', 'agent_discovery']
-        )
-    
-    def _synthesize_agent_coverage(self):
-        host_field_ref, host_intel = self._find_best_field('host_identity')
-        status_field_ref, status_intel = self._find_best_field('agent_status')
-        
-        if not host_field_ref:
-            return None
-        
-        host_table, host_column = host_field_ref.split('.', 1)
-        
-        if status_field_ref:
-            status_table, status_column = status_field_ref.split('.', 1)
-            status_expr = f'"{status_column}"'
-        else:
-            status_expr = '''
-            CASE 
-                WHEN crowdstrike_agent_health IS NOT NULL THEN crowdstrike_agent_health
-                WHEN crowdstrike_device_hostname IS NOT NULL THEN 'Active'
-                ELSE 'Unknown'
-            END'''
-        
-        sql = f'''
-        WITH agent_status_analysis AS (
-            SELECT 
-                "{host_column}" as asset_id,
-                {status_expr} as agent_status,
-                CASE WHEN crowdstrike_device_hostname IS NOT NULL THEN 1 ELSE 0 END as has_agent
-            FROM "{host_table}"
-            WHERE "{host_column}" IS NOT NULL
-        ),
-        status_summary AS (
-            SELECT 
-                agent_status,
-                COUNT(*) as agent_count,
-                COUNT(DISTINCT asset_id) as unique_assets
-            FROM agent_status_analysis
-            WHERE has_agent = 1
-            GROUP BY agent_status
-        ),
-        overall_metrics AS (
-            SELECT 
-                COUNT(DISTINCT asset_id) as total_assets,
-                SUM(has_agent) as total_agents
-            FROM agent_status_analysis
-        )
-        SELECT 
-            ss.agent_status,
-            ss.agent_count,
-            ss.unique_assets,
-            ROUND(CAST(ss.unique_assets AS FLOAT) / CAST(om.total_agents AS FLOAT) * 100, 2) as status_percentage,
-            om.total_assets,
-            om.total_agents,
-            ROUND(CAST(om.total_agents AS FLOAT) / CAST(om.total_assets AS FLOAT) * 100, 2) as agent_deployment_pct
-        FROM status_summary ss
-        CROSS JOIN overall_metrics om
-        ORDER BY ss.unique_assets DESC
-        '''
-        
-        confidence = host_intel.confidence if host_intel else 0.3
-        if status_intel:
-            confidence = (confidence + status_intel.confidence) / 2
-        
-        return QuerySynthesis(
-            name='agent_health_coverage',
-            purpose='Security agent deployment and health status analysis',
-            sql=sql,
-            confidence=confidence,
-            validation_checks=['total_assets > 0', 'agent_deployment_pct <= 100'],
-            expected_ranges={'agent_deployment_pct': (0, 100), 'status_percentage': (0, 100)},
-            fallback_strategies=['health_inference', 'timestamp_analysis']
-        )
-    
-    def _synthesize_infrastructure_coverage(self):
-        host_field_ref, host_intel = self._find_best_field('host_identity')
-        infra_field_ref, infra_intel = self._find_best_field('infrastructure_type')
-        
-        if not host_field_ref:
-            return None
-        
-        host_table, host_column = host_field_ref.split('.', 1)
-        
-        if infra_field_ref:
-            infra_table, infra_column = infra_field_ref.split('.', 1)
-            infra_expr = f'"{infra_column}"'
-        else:
-            infra_expr = f'''
-            CASE 
-                WHEN LOWER("{host_column}") LIKE '%ec2%' OR LOWER("{host_column}") LIKE '%aws%' THEN 'AWS Cloud'
-                WHEN LOWER("{host_column}") LIKE '%azure%' THEN 'Azure Cloud'
-                WHEN LOWER("{host_column}") LIKE '%gcp%' OR LOWER("{host_column}") LIKE '%google%' THEN 'GCP Cloud'
-                WHEN LOWER("{host_column}") LIKE '%vm%' OR LOWER("{host_column}") LIKE '%virtual%' THEN 'Virtual'
-                WHEN LOWER("{host_column}") LIKE '%container%' OR LOWER("{host_column}") LIKE '%docker%' THEN 'Container'
-                WHEN LOWER("{host_column}") LIKE '%server%' THEN 'Server'
-                WHEN LOWER("{host_column}") LIKE '%desktop%' OR LOWER("{host_column}") LIKE '%pc%' THEN 'Desktop'
-                ELSE 'On-Premise'
-            END'''
-        
-        sql = f'''
-        WITH infrastructure_classification AS (
-            SELECT 
-                "{host_column}" as asset_id,
-                {infra_expr} as infrastructure_type,
-                CASE WHEN chronicle_device_hostname IS NOT NULL THEN 1 ELSE 0 END as has_logging
-            FROM "{host_table}"
-            WHERE "{host_column}" IS NOT NULL
-        ),
-        infra_summary AS (
-            SELECT 
-                infrastructure_type,
-                COUNT(DISTINCT asset_id) as total_assets,
-                SUM(has_logging) as assets_with_logging,
-                ROUND(CAST(SUM(has_logging) AS FLOAT) / CAST(COUNT(DISTINCT asset_id) AS FLOAT) * 100, 2) as logging_coverage_pct
-            FROM infrastructure_classification
-            GROUP BY infrastructure_type
-        ),
-        grand_totals AS (
-            SELECT 
-                SUM(total_assets) as overall_total,
-                SUM(assets_with_logging) as overall_logged
-            FROM infra_summary
-        )
-        SELECT 
-            is_tbl.infrastructure_type,
-            is_tbl.total_assets,
-            is_tbl.assets_with_logging,
-            is_tbl.logging_coverage_pct,
-            ROUND(CAST(is_tbl.total_assets AS FLOAT) / CAST(gt.overall_total AS FLOAT) * 100, 2) as infrastructure_distribution_pct
-        FROM infra_summary is_tbl
-        CROSS JOIN grand_totals gt
-        ORDER BY is_tbl.total_assets DESC
-        '''
-        
-        confidence = host_intel.confidence if host_intel else 0.3
-        if infra_intel:
-            confidence = (confidence + infra_intel.confidence) / 2
-        
-        return QuerySynthesis(
-            name='infrastructure_classification',
-            purpose='Infrastructure type distribution and logging coverage analysis',
-            sql=sql,
-            confidence=confidence,
-            validation_checks=['total_assets > 0', 'logging_coverage_pct <= 100'],
-            expected_ranges={'logging_coverage_pct': (0, 100), 'infrastructure_distribution_pct': (0, 100)},
-            fallback_strategies=['hostname_inference', 'ip_classification']
-        )
-    
-    def _synthesize_geographic_coverage(self):
-        host_field_ref, host_intel = self._find_best_field('host_identity')
-        geo_field_ref, geo_intel = self._find_best_field('geographic_data')
-        
-        if not host_field_ref:
-            return None
-        
-        host_table, host_column = host_field_ref.split('.', 1)
-        
-        if geo_field_ref:
-            geo_table, geo_column = geo_field_ref.split('.', 1)
-            geo_expr = f'"{geo_column}"'
-        else:
-            geo_expr = '''
-            CASE 
-                WHEN timezone LIKE '%US%' OR timezone LIKE '%America%' THEN 'North America'
-                WHEN timezone LIKE '%Europe%' THEN 'Europe'
-                WHEN timezone LIKE '%Asia%' THEN 'Asia Pacific'
-                WHEN region IS NOT NULL THEN region
-                ELSE 'Unknown'
-            END'''
-        
-        sql = f'''
-        WITH geographic_analysis AS (
-            SELECT 
-                "{host_column}" as asset_id,
-                {geo_expr} as region,
-                CASE WHEN chronicle_device_hostname IS NOT NULL OR crowdstrike_device_hostname IS NOT NULL THEN 1 ELSE 0 END as has_coverage
-            FROM "{host_table}"
-            WHERE "{host_column}" IS NOT NULL
-        ),
-        regional_summary AS (
-            SELECT 
-                region,
-                COUNT(DISTINCT asset_id) as total_assets,
-                SUM(has_coverage) as covered_assets,
-                ROUND(CAST(SUM(has_coverage) AS FLOAT) / CAST(COUNT(DISTINCT asset_id) AS FLOAT) * 100, 2) as regional_coverage_pct
-            FROM geographic_analysis
-            GROUP BY region
-        )
-        SELECT 
-            region,
-            total_assets,
-            covered_assets,
-            regional_coverage_pct
-        FROM regional_summary
-        WHERE region != 'Unknown' OR total_assets > 100
-        ORDER BY total_assets DESC
-        '''
-        
-        confidence = host_intel.confidence * 0.7 if host_intel else 0.2
-        if geo_intel:
-            confidence = (confidence + geo_intel.confidence) / 2
-        
-        return QuerySynthesis(
-            name='geographic_coverage',
-            purpose='Geographic distribution and coverage analysis',
-            sql=sql,
-            confidence=confidence,
-            validation_checks=['total_assets > 0', 'regional_coverage_pct <= 100'],
-            expected_ranges={'regional_coverage_pct': (0, 100)},
-            fallback_strategies=['timezone_analysis', 'ip_geolocation']
-        )
-    
-    def _synthesize_volume_analysis(self):
-        tables = self._discover_tables()
-        primary_table = None
-        
-        for table in tables:
-            if 'all_sources' in table.lower() or 'combined' in table.lower():
-                primary_table = table
-                break
-        
-        if not primary_table:
-            primary_table = tables[0] if tables else 'all_sources'
-        
-        sql = f'''
-        WITH daily_volume AS (
-            SELECT 
-                DATE(COALESCE(timestamp, event_time, log_time, time, created_at)) as log_date,
-                COUNT(*) as daily_count,
-                COUNT(DISTINCT COALESCE(host, hostname, device_name, computer_name)) as unique_assets_daily
-            FROM "{primary_table}"
-            WHERE DATE(COALESCE(timestamp, event_time, log_time, time, created_at)) >= CURRENT_DATE - INTERVAL '30 days'
-            GROUP BY DATE(COALESCE(timestamp, event_time, log_time, time, created_at))
-        ),
-        volume_stats AS (
-            SELECT 
-                AVG(daily_count) as avg_daily_volume,
-                MIN(daily_count) as min_daily_volume,
-                MAX(daily_count) as max_daily_volume,
-                STDDEV(daily_count) as volume_stddev,
-                SUM(daily_count) as total_30day_volume
-            FROM daily_volume
-        )
-        SELECT 
-            ROUND(avg_daily_volume, 0) as average_daily_logs,
-            min_daily_volume,
-            max_daily_volume,
-            ROUND(volume_stddev, 0) as volume_standard_deviation,
-            total_30day_volume,
-            ROUND(CAST(volume_stddev AS FLOAT) / CAST(avg_daily_volume AS FLOAT) * 100, 2) as volume_variability_pct
-        FROM volume_stats
-        '''
-        
-        return QuerySynthesis(
-            name='log_volume_analysis',
-            purpose='Log ingestion volume and quality trends analysis',
-            sql=sql,
-            confidence=0.8,
-            validation_checks=['average_daily_logs > 0'],
-            expected_ranges={'volume_variability_pct': (0, 200)},
-            fallback_strategies=['table_row_counts', 'timestamp_analysis']
-        )
-    
-    def _create_synthetic_host_field(self):
-        best_candidates = []
-        
-        for field_ref, intel in self.field_intelligence.items():
-            if any(sig.pattern_type == 'host_identity' for sig in intel.signatures):
-                best_candidates.append((field_ref, intel))
-        
-        if best_candidates:
-            best_field_ref, best_intel = max(best_candidates, key=lambda x: x[1].confidence)
-            return best_field_ref
-        
-        return None
-    
-    def _find_alternative_identifier(self):
-        identifier_patterns = ['host', 'name', 'id', 'device', 'computer', 'machine', 'asset']
-        
-        for field_ref, intel in self.field_intelligence.items():
-            table, column = field_ref.split('.', 1)
-            column_lower = column.lower()
-            
-            if any(pattern in column_lower for pattern in identifier_patterns):
-                if intel.statistical_profile.get('uniqueness_ratio', 0) > 0.5:
-                    return field_ref
-        
-        return None
-    
-    def _synthesize_network_classification(self):
-        for field_ref, intel in self.field_intelligence.items():
-            if any(sig.pattern_type == 'network_logs' for sig in intel.signatures):
-                return field_ref
-        
-        return None
-    
-    def _synthesize_endpoint_classification(self):
-        for field_ref, intel in self.field_intelligence.items():
-            if any(sig.pattern_type == 'endpoint_logs' for sig in intel.signatures):
-                return field_ref
-        
-        return None
     
     def _validate_and_heal_query(self, synthesis: QuerySynthesis):
         logger.info(f"🔄 RELENTLESS TESTING: {synthesis.name}")
@@ -1884,7 +1223,7 @@ class BrilliantQueryEngine:
             select 
                 count(*) as total_records,
                 count(distinct {column}) as unique_values,
-                '{synthesis.name}' as query_type
+                'basic_count_test' as query_type
             from {target_table}
             '''
         
@@ -2143,7 +1482,7 @@ class BrilliantQueryEngine:
         select 
             {column} as "Asset_ID",
             count(*) as "Record_Count",
-            '{synthesis.name}' as "Query_Name"
+            'Column_Alias_Test' as "Query_Name"
         from {target_table}
         where {column} is not null
         group by {column}
@@ -2338,13 +1677,32 @@ class BrilliantQueryEngine:
     def _add_working_query_to_app(self, synthesis: QuerySynthesis, row_count: int):
         """Add working query as commented code to app.py"""
         try:
-            app_py_path = Path("app.py")
+            # Try multiple possible locations for app.py
+            possible_paths = [
+                Path("app.py"),
+                Path("./app.py"), 
+                Path("../app.py"),
+                Path("../../app.py")
+            ]
             
-            if not app_py_path.exists():
-                logger.debug("app.py not found, skipping auto-add")
-                return
+            app_py_path = None
+            for path in possible_paths:
+                if path.exists():
+                    app_py_path = path
+                    break
+            
+            if not app_py_path:
+                # Create app.py if it doesn't exist
+                app_py_path = Path("app.py")
+                with open(app_py_path, 'w') as f:
+                    f.write("# Auto-generated app.py for AO1 queries\n")
+                logger.info(f"   📄 Created new app.py file")
             
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Create the route name - convert snake_case to camelCase for Flask route
+            route_name = synthesis.name.replace('_', '').title().replace(' ', '')
+            function_name = synthesis.name.lower()
             
             comment_block = f'''
 
@@ -2356,8 +1714,8 @@ class BrilliantQueryEngine:
 # Confidence: {synthesis.confidence:.3f}
 # ============================================================================
 
-# @app.route("/get{synthesis.name.replace('_', '').title()}")
-# def get_{synthesis.name}():
+# @app.route("/get{route_name}")
+# def get_{function_name}():
 #     query = """
 {self._format_sql_for_comment(synthesis.sql)}
 #     """
@@ -2369,7 +1727,7 @@ class BrilliantQueryEngine:
             with open(app_py_path, 'a', encoding='utf-8') as f:
                 f.write(comment_block)
             
-            logger.info(f"   📝 Added {synthesis.name} to app.py as commented code")
+            logger.info(f"   📝 Added {synthesis.name} to app.py as commented Flask route")
             
         except Exception as e:
             logger.debug(f"Could not add to app.py: {e}")
@@ -2387,291 +1745,12 @@ class BrilliantQueryEngine:
         
         return '\n'.join(formatted_lines)
     
-    def _quick_fix_sql(self, sql, error):
-        if 'column' in error.lower() and 'not found' in error.lower():
-            return '''
-            select 
-                'Fixed Query' as analysis_type,
-                count(distinct splunk_host) as total_assets,
-                count(distinct case when chronicle_ips is not null or chronicle_host is not null then splunk_host end) as covered_assets,
-                round((count(distinct case when chronicle_ips is not null or chronicle_host is not null then splunk_host end) * 100.0 / count(distinct splunk_host)), 2) as coverage_percent
-            from combined
-            where splunk_host is not null
-            '''
-        
-        if 'table' in error.lower():
-            return sql.replace('FROM "', 'FROM ').replace('"', '')
-        
-        return '''
-        select 
-            'Fallback Query' as analysis_type,
-            count(*) as total_records,
-            count(distinct splunk_host) as unique_hosts
-        from combined
-        '''
-    
-    def _validate_results_smart(self, results, synthesis):
-        if not results or len(results) == 0:
-            return False
-        
-        try:
-            first_row = results[0]
-            
-            if isinstance(first_row, (list, tuple)):
-                for val in first_row:
-                    if isinstance(val, (int, float)) and val > 0:
-                        return True
-            
-            return len(results) > 0
-            
-        except Exception as e:
-            logger.debug(f"Validation check failed: {e}")
-            return len(results) > 0
-    
-    def _evaluate_validation_check(self, results, check):
-        try:
-            if 'total_assets > 0' in check:
-                for row in results:
-                    if isinstance(row, (list, tuple)):
-                        for val in row:
-                            if isinstance(val, (int, float)) and val > 0:
-                                return True
-                    elif hasattr(row, '__dict__'):
-                        for val in row.__dict__.values():
-                            if isinstance(val, (int, float)) and val > 0:
-                                return True
-                return False
-            
-            return True
-        except:
-            return True
-    
-    def _validate_metric_range(self, results, metric, min_val, max_val):
-        try:
-            for row in results:
-                if isinstance(row, (list, tuple)):
-                    for val in row:
-                        if isinstance(val, (int, float)):
-                            if min_val <= val <= max_val:
-                                return True
-                elif hasattr(row, '__dict__'):
-                    for val in row.__dict__.values():
-                        if isinstance(val, (int, float)):
-                            if min_val <= val <= max_val:
-                                return True
-            return True
-        except:
-            return True
-    
-    def _heal_query_intelligently(self, sql, synthesis, cycle):
-        healing_strategies = [
-            self._add_null_checks,
-            self._simplify_case_statements,
-            self._add_fallback_columns,
-            self._optimize_joins,
-            self._add_data_validation,
-            self._adjust_aggregations
-        ]
-        
-        strategy_index = (cycle - 1) % len(healing_strategies)
-        strategy = healing_strategies[strategy_index]
-        
-        return strategy(sql, synthesis)
-    
-    def _heal_sql_error(self, sql, error_msg, cycle):
-        if 'column' in error_msg and 'not found' in error_msg:
-            return self._fix_column_references(sql, error_msg)
-        elif 'table' in error_msg and ('not found' in error_msg or 'does not exist' in error_msg):
-            return self._fix_table_references(sql, error_msg)
-        elif 'syntax' in error_msg or 'parse' in error_msg:
-            return self._fix_syntax_errors(sql, error_msg)
-        elif 'type' in error_msg or 'cast' in error_msg:
-            return self._fix_type_errors(sql, error_msg)
-        else:
-            return self._apply_generic_healing(sql, cycle)
-    
-    def _add_null_checks(self, sql, synthesis):
-        null_check_patterns = [
-            (r'WHERE (\w+) IS NOT NULL', r'WHERE \1 IS NOT NULL AND \1 != \'\''),
-            (r'COUNT\(([^)]+)\)', r'COUNT(CASE WHEN \1 IS NOT NULL AND \1 != \'\' THEN 1 END)'),
-            (r'DISTINCT (\w+)', r'DISTINCT \1 WHERE \1 IS NOT NULL')
-        ]
-        
-        healed_sql = sql
-        for pattern, replacement in null_check_patterns:
-            healed_sql = re.sub(pattern, replacement, healed_sql, flags=re.IGNORECASE)
-        
-        return healed_sql
-    
-    def _simplify_case_statements(self, sql, synthesis):
-        case_pattern = r'CASE\s+WHEN[^E]+END'
-        matches = re.findall(case_pattern, sql, re.IGNORECASE | re.DOTALL)
-        
-        healed_sql = sql
-        for match in matches:
-            simplified = 'COALESCE(column_name, \'Unknown\')'
-            healed_sql = healed_sql.replace(match, simplified)
-        
-        return healed_sql
-    
-    def _add_fallback_columns(self, sql, synthesis):
-        column_fallbacks = {
-            'host': ['hostname', 'device_name', 'computer_name', 'name'],
-            'timestamp': ['event_time', 'log_time', 'time', 'created_at'],
-            'region': ['country', 'location', 'timezone']
-        }
-        
-        healed_sql = sql
-        for primary, fallbacks in column_fallbacks.items():
-            fallback_expr = f"COALESCE({primary}, {', '.join(fallbacks)})"
-            healed_sql = re.sub(rf'\b{primary}\b', fallback_expr, healed_sql, flags=re.IGNORECASE)
-        
-        return healed_sql
-    
-    def _optimize_joins(self, sql, synthesis):
-        if 'LEFT JOIN' in sql.upper():
-            healed_sql = sql.replace('LEFT JOIN', 'LEFT JOIN LATERAL')
-        else:
-            healed_sql = sql
-        
-        return healed_sql
-    
-    def _add_data_validation(self, sql, synthesis):
-        validation_clauses = [
-            'AND LENGTH(TRIM(asset_id)) > 2',
-            'AND asset_id NOT LIKE \'%test%\'',
-            'AND asset_id NOT LIKE \'%null%\''
-        ]
-        
-        healed_sql = sql
-        for clause in validation_clauses:
-            if 'WHERE' in healed_sql.upper():
-                healed_sql = healed_sql.replace('WHERE', f'WHERE{clause} AND', 1)
-            else:
-                healed_sql += f' WHERE 1=1 {clause}'
-        
-        return healed_sql
-    
-    def _adjust_aggregations(self, sql, synthesis):
-        agg_replacements = [
-            (r'COUNT\(\*\)', 'COUNT(DISTINCT asset_id)'),
-            (r'SUM\(([^)]+)\)', r'COALESCE(SUM(\1), 0)'),
-            (r'AVG\(([^)]+)\)', r'COALESCE(AVG(\1), 0)')
-        ]
-        
-        healed_sql = sql
-        for pattern, replacement in agg_replacements:
-            healed_sql = re.sub(pattern, replacement, healed_sql, flags=re.IGNORECASE)
-        
-        return healed_sql
-    
-    def _fix_column_references(self, sql, error_msg):
-        column_match = re.search(r'column ["\']?([^"\']+)["\']?', error_msg, re.IGNORECASE)
-        if not column_match:
-            return sql
-        
-        problem_column = column_match.group(1)
-        
-        alternative_mappings = {}
-        for field_ref, intel in self.field_intelligence.items():
-            if intel.confidence > 0.5:
-                table, column = field_ref.split('.', 1)
-                alternative_mappings[column.lower()] = column
-        
-        problem_lower = problem_column.lower()
-        
-        if problem_lower in alternative_mappings:
-            replacement = alternative_mappings[problem_lower]
-            return sql.replace(f'"{problem_column}"', f'"{replacement}"')
-        
-        for existing_col, replacement in alternative_mappings.items():
-            if problem_lower in existing_col or existing_col in problem_lower:
-                return sql.replace(f'"{problem_column}"', f'"{replacement}"')
-        
-        common_alternatives = {
-            'host': ['hostname', 'device_name', 'computer_name', 'name', 'asset_id'],
-            'hostname': ['host', 'device_name', 'computer_name', 'name'],
-            'timestamp': ['event_time', 'log_time', 'time', 'created_at', 'date'],
-            'log_type': ['sourcetype', 'event_type', 'type', 'source', 'category']
-        }
-        
-        alternatives = common_alternatives.get(problem_column.lower(), [])
-        
-        for alt in alternatives:
-            if alt in alternative_mappings.values():
-                healed_sql = sql.replace(f'"{problem_column}"', f'"{alt}"')
-                healed_sql = healed_sql.replace(problem_column, alt)
-                return healed_sql
-        
-        return sql.replace(f'"{problem_column}"', 'host')
-    
-    def _fix_table_references(self, sql, error_msg):
-        tables = self._discover_tables()
-        
-        table_priorities = ['all_sources', 'combined', 'main', 'data']
-        
-        for priority_table in table_priorities:
-            for table in tables:
-                if priority_table in table.lower():
-                    fixed_sql = re.sub(r'FROM\s+["\']?\w+["\']?', f'FROM "{table}"', sql, flags=re.IGNORECASE)
-                    fixed_sql = re.sub(r'JOIN\s+["\']?\w+["\']?', f'JOIN "{table}"', fixed_sql, flags=re.IGNORECASE)
-                    return fixed_sql
-        
-        if tables:
-            primary_table = f'"{tables[0]}"'
-            fixed_sql = re.sub(r'FROM\s+["\']?\w+["\']?', f'FROM {primary_table}', sql, flags=re.IGNORECASE)
-            fixed_sql = re.sub(r'JOIN\s+["\']?\w+["\']?', f'JOIN {primary_table}', fixed_sql, flags=re.IGNORECASE)
-            return fixed_sql
-        
-        return sql
-    
-    def _fix_syntax_errors(self, sql, error_msg):
-        syntax_fixes = [
-            (r'(\w+)\.(\w+)', r'"\1"."\2"'),
-            (r'(["\'])[^"\']*\1\s*=\s*(["\'])[^"\']*\2', r'\1=\2'),
-            (r';\s*$', ''),
-            (r'\s+', ' ')
-        ]
-        
-        healed_sql = sql
-        for pattern, replacement in syntax_fixes:
-            healed_sql = re.sub(pattern, replacement, healed_sql)
-        
-        return healed_sql.strip()
-    
-    def _fix_type_errors(self, sql, error_msg):
-        type_fixes = [
-            (r'([a-zA-Z_][a-zA-Z0-9_]*)\s*/\s*([a-zA-Z_][a-zA-Z0-9_]*)', r'CAST(\1 AS FLOAT) / CAST(\2 AS FLOAT)'),
-            (r'COUNT\(([^)]+)\)\s*\*\s*100', r'CAST(COUNT(\1) AS FLOAT) * 100'),
-            (r'(\w+)\s*\*\s*100\.0', r'CAST(\1 AS FLOAT) * 100.0')
-        ]
-        
-        healed_sql = sql
-        for pattern, replacement in type_fixes:
-            healed_sql = re.sub(pattern, replacement, healed_sql)
-        
-        return healed_sql
-    
-    def _apply_generic_healing(self, sql, cycle):
-        generic_strategies = [
-            lambda s: s.replace('*', 'COUNT(*)'),
-            lambda s: s.replace('GROUP BY', 'GROUP BY 1,2,3,4,5') if 'GROUP BY' in s else s,
-            lambda s: s + ' LIMIT 1000',
-            lambda s: re.sub(r'ORDER BY [^L]+', 'ORDER BY 1', s, flags=re.IGNORECASE),
-            lambda s: s.replace('WHERE', 'WHERE 1=1 AND')
-        ]
-        
-        if cycle <= len(generic_strategies):
-            return generic_strategies[cycle - 1](sql)
-        
-        return sql
-    
     def generate_final_brilliant_report(self):
-        logger.info("🎯 GENERATING BRILLIANT AO1 FINAL REPORT")
+        logger.info("📊 GENERATING FINAL BRILLIANT REPORT")
         
-        total_requirements = 7
+        total_requirements = 25
         successful_queries = len(self.query_syntheses)
-        success_rate = (successful_queries / total_requirements) * 100
+        success_rate = (successful_queries / total_requirements) * 100 if total_requirements > 0 else 0
         
         report = {
             'timestamp': datetime.now().isoformat(),
@@ -2727,6 +1806,16 @@ class BrilliantQueryEngine:
             'capabilities_available': capabilities,
             'capability_score': sum(capabilities.values()) / len(capabilities) * 100
         }
+    
+    def _find_best_field(self, pattern_type, min_confidence=0.3):
+        candidates = []
+        for field_ref, intel in self.field_intelligence.items():
+            if intel.primary_type == pattern_type and intel.confidence >= min_confidence:
+                candidates.append((field_ref, intel))
+        
+        if candidates:
+            return max(candidates, key=lambda x: x[1].confidence)
+        return None, None
     
     def _calculate_data_quality_score(self):
         if not self.field_intelligence:
