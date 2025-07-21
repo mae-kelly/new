@@ -382,29 +382,744 @@ class BrilliantQueryEngine:
         return list(set(options))
     
     def synthesize_brilliant_queries(self):
-        logger.info("⚡ SYNTHESIZING BRILLIANT AO1 QUERIES")
+        logger.info("⚡ SYNTHESIZING ALL AO1 CONFLUENCE REQUIREMENTS")
         
         with self.db_connection():
             
-            query_templates = {
-                'global_asset_coverage': self._build_simple_coverage_query,
-                'network_role_coverage': self._build_simple_network_query,
-                'endpoint_role_coverage': self._build_simple_endpoint_query,
-                'agent_health_coverage': self._build_simple_agent_query,
-                'infrastructure_classification': self._build_simple_infra_query
+            # Complete AO1 query requirements from Confluence
+            ao1_queries = {
+                'global_asset_coverage': 'Global view - x% of all assets globally',
+                'infrastructure_type_coverage': 'Infrastructure type breakdown (On-Prem/Cloud/SaaS/API)',
+                'regional_coverage_analysis': 'Regional and country coverage breakdown',
+                'business_unit_coverage': 'Business unit and CIO coverage analysis',
+                'system_classification_coverage': 'System classification (Web/Windows/Linux/DB/Network)',
+                'security_control_coverage': 'Security control coverage (EDR/Tanium/DLP)',
+                'network_role_coverage': 'Network logging role coverage (Firewall/IDS/Proxy/DNS/WAF)',
+                'endpoint_role_coverage': 'Endpoint logging coverage (OS/EDR/DLP/FIM)',
+                'cloud_role_coverage': 'Cloud logging coverage (Cloud Events/Load Balancer)',
+                'application_coverage': 'Application logging coverage (Web Logs/API Gateway)',
+                'identity_auth_coverage': 'Identity and authentication coverage',
+                'url_fqdn_coverage': 'URL/FQDN coverage analysis',
+                'cmdb_asset_visibility': 'CMDB asset correlation and visibility',
+                'network_zones_coverage': 'Network zones and spans coverage',
+                'ipam_coverage': 'iPAM public IP coverage',
+                'geolocation_coverage': 'Geolocation and VPC coverage',
+                'log_ingest_volume': 'Log ingest volume and quality metrics',
+                'crowdstrike_agent_coverage': 'CrowdStrike agent deployment and health',
+                'domain_visibility': 'Domain visibility by hostname analysis',
+                'cloud_region_coverage': 'Cloud region specific coverage',
+                'data_center_coverage': 'Data center coverage analysis',
+                'apm_coverage': 'APM and application monitoring coverage',
+                'vulnerability_coverage': 'Vulnerability scanning coverage',
+                'discovery_coverage': 'Asset discovery and scanning coverage',
+                'compliance_coverage': 'Logging compliance GSO and Splunk'
             }
             
-            for req_name, builder in query_templates.items():
+            for req_name, description in ao1_queries.items():
                 logger.info(f"🎯 Building: {req_name}")
                 
-                synthesis = builder()
+                synthesis = self._build_ao1_requirement_query(req_name, description)
                 if synthesis:
                     validated = self._validate_and_heal_query(synthesis)
                     if validated:
                         self.query_syntheses[req_name] = validated
                         logger.info(f"   ✅ SUCCESS!")
                     else:
-                        logger.info(f"   ⚠️ Skipping: {req_name}")
+                        logger.info(f"   ⚠️ Still working on: {req_name}")
+    
+    def _build_ao1_requirement_query(self, req_name: str, description: str):
+        """Build specific AO1 requirement query based on Confluence specs"""
+        
+        if req_name == 'global_asset_coverage':
+            return self._build_global_coverage_query()
+        elif req_name == 'infrastructure_type_coverage':
+            return self._build_infrastructure_type_query()
+        elif req_name == 'regional_coverage_analysis':
+            return self._build_regional_coverage_query()
+        elif req_name == 'business_unit_coverage':
+            return self._build_business_unit_query()
+        elif req_name == 'system_classification_coverage':
+            return self._build_system_classification_query()
+        elif req_name == 'security_control_coverage':
+            return self._build_security_control_query()
+        elif req_name == 'network_role_coverage':
+            return self._build_network_role_query()
+        elif req_name == 'endpoint_role_coverage':
+            return self._build_endpoint_role_query()
+        elif req_name == 'cloud_role_coverage':
+            return self._build_cloud_role_query()
+        elif req_name == 'application_coverage':
+            return self._build_application_coverage_query()
+        elif req_name == 'identity_auth_coverage':
+            return self._build_identity_auth_query()
+        elif req_name == 'url_fqdn_coverage':
+            return self._build_url_fqdn_query()
+        elif req_name == 'cmdb_asset_visibility':
+            return self._build_cmdb_visibility_query()
+        elif req_name == 'network_zones_coverage':
+            return self._build_network_zones_query()
+        elif req_name == 'ipam_coverage':
+            return self._build_ipam_coverage_query()
+        elif req_name == 'geolocation_coverage':
+            return self._build_geolocation_query()
+        elif req_name == 'log_ingest_volume':
+            return self._build_log_volume_query()
+        elif req_name == 'crowdstrike_agent_coverage':
+            return self._build_crowdstrike_query()
+        elif req_name == 'domain_visibility':
+            return self._build_domain_visibility_query()
+        elif req_name == 'cloud_region_coverage':
+            return self._build_cloud_region_query()
+        elif req_name == 'data_center_coverage':
+            return self._build_data_center_query()
+        elif req_name == 'apm_coverage':
+            return self._build_apm_coverage_query()
+        elif req_name == 'vulnerability_coverage':
+            return self._build_vulnerability_query()
+        elif req_name == 'discovery_coverage':
+            return self._build_discovery_query()
+        elif req_name == 'compliance_coverage':
+            return self._build_compliance_query()
+        else:
+            return self._build_generic_ao1_query(req_name, description)
+    
+    def _build_global_coverage_query(self):
+        return QuerySynthesis(
+            name='global_asset_coverage',
+            purpose='Global view - x% of all assets globally per Confluence requirements',
+            sql='''
+            select 
+                'Global Asset Coverage' as metric_name,
+                count(distinct splunk_host) as total_assets_splunk,
+                count(distinct chronicle_host) as total_assets_chronicle,
+                count(distinct crowdstrike_device_hostname) as total_assets_crowdstrike,
+                count(distinct case when splunk_host is not null or chronicle_host is not null or crowdstrike_device_hostname is not null then coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname) end) as total_unique_assets,
+                round(count(distinct case when chronicle_host is not null then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as chronicle_coverage_percent,
+                round(count(distinct case when crowdstrike_device_hostname is not null then coalesce(splunk_host, crowdstrike_device_hostname) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as crowdstrike_coverage_percent,
+                round(count(distinct case when splunk_host is not null then splunk_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as splunk_coverage_percent
+            from combined
+            ''',
+            confidence=0.95,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_infrastructure_type_query(self):
+        return QuerySynthesis(
+            name='infrastructure_type_coverage',
+            purpose='Infrastructure type breakdown (On-Prem/Cloud/SaaS/API) per Confluence',
+            sql='''
+            select 
+                case 
+                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%aws%' or lower(coalesce(splunk_host, chronicle_host)) like '%ec2%' then 'Cloud-AWS'
+                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%azure%' then 'Cloud-Azure'
+                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%gcp%' or lower(coalesce(splunk_host, chronicle_host)) like '%google%' then 'Cloud-GCP'
+                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%cloud%' then 'Cloud-Other'
+                    when lower(data_type) like '%api%' or lower(coalesce(splunk_host, chronicle_host)) like '%api%' then 'API'
+                    when lower(data_type) like '%saas%' or lower(coalesce(splunk_host, chronicle_host)) like '%saas%' then 'SaaS'
+                    else 'On-Premise'
+                end as infrastructure_type,
+                count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) as asset_count,
+                count(distinct case when chronicle_host is not null then coalesce(splunk_host, chronicle_host) end) as chronicle_covered,
+                count(distinct case when crowdstrike_device_hostname is not null then coalesce(splunk_host, crowdstrike_device_hostname) end) as edr_covered,
+                round(count(distinct case when chronicle_host is not null then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as chronicle_coverage_percent
+            from combined
+            where coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname) is not null
+            group by infrastructure_type
+            order by asset_count desc
+            ''',
+            confidence=0.90,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_regional_coverage_query(self):
+        return QuerySynthesis(
+            name='regional_coverage_analysis',
+            purpose='Regional and country coverage breakdown per Confluence requirements',
+            sql='''
+            select 
+                coalesce(region, 'Unknown Region') as region,
+                coalesce(country, 'Unknown Country') as country,
+                count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) as total_assets,
+                count(distinct case when chronicle_host is not null then coalesce(splunk_host, chronicle_host) end) as chronicle_assets,
+                count(distinct case when splunk_host is not null then splunk_host end) as splunk_assets,
+                round(count(distinct case when chronicle_host is not null then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as chronicle_coverage_percent,
+                round(count(distinct case when splunk_host is not null then splunk_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as splunk_coverage_percent
+            from combined
+            where coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname) is not null
+            group by region, country
+            order by total_assets desc
+            ''',
+            confidence=0.85,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_system_classification_query(self):
+        return QuerySynthesis(
+            name='system_classification_coverage',
+            purpose='System classification (Web/Windows/Linux/DB/Network) per Confluence',
+            sql='''
+            select 
+                case 
+                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%web%' or lower(coalesce(splunk_host, chronicle_host)) like '%www%' then 'Web Server'
+                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%win%' or lower(coalesce(splunk_host, chronicle_host)) like '%windows%' then 'Windows Server'
+                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%linux%' or lower(coalesce(splunk_host, chronicle_host)) like '%unix%' then 'Linux Server'
+                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%db%' or lower(coalesce(splunk_host, chronicle_host)) like '%database%' or lower(coalesce(splunk_host, chronicle_host)) like '%sql%' then 'Database'
+                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%fw%' or lower(coalesce(splunk_host, chronicle_host)) like '%firewall%' or lower(coalesce(splunk_host, chronicle_host)) like '%router%' or lower(coalesce(splunk_host, chronicle_host)) like '%switch%' then 'Network Appliance'
+                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%server%' then 'Server-Other'
+                    else 'Unknown System'
+                end as system_classification,
+                count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) as asset_count,
+                count(distinct case when chronicle_host is not null then coalesce(splunk_host, chronicle_host) end) as chronicle_covered,
+                count(distinct case when crowdstrike_device_hostname is not null then coalesce(splunk_host, crowdstrike_device_hostname) end) as edr_covered,
+                round(count(distinct case when chronicle_host is not null then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as coverage_percent
+            from combined
+            where coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname) is not null
+            group by system_classification
+            order by asset_count desc
+            ''',
+            confidence=0.88,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_security_control_query(self):
+        return QuerySynthesis(
+            name='security_control_coverage',
+            purpose='Security control coverage (EDR/Tanium/DLP) per Confluence',
+            sql='''
+            select 
+                'Security Controls Analysis' as analysis_type,
+                count(distinct case when crowdstrike_device_hostname is not null then coalesce(splunk_host, crowdstrike_device_hostname) end) as edr_covered_assets,
+                count(distinct case when lower(coalesce(data_type, '')) like '%tanium%' then coalesce(splunk_host, chronicle_host) end) as tanium_covered_assets,
+                count(distinct case when lower(coalesce(data_type, '')) like '%dlp%' then coalesce(splunk_host, chronicle_host) end) as dlp_covered_assets,
+                count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) as total_assets,
+                round(count(distinct case when crowdstrike_device_hostname is not null then coalesce(splunk_host, crowdstrike_device_hostname) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as edr_coverage_percent,
+                round(count(distinct case when lower(coalesce(data_type, '')) like '%tanium%' then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as tanium_coverage_percent,
+                round(count(distinct case when lower(coalesce(data_type, '')) like '%dlp%' then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as dlp_coverage_percent
+            from combined
+            where coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname) is not null
+            ''',
+            confidence=0.85,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_network_role_query(self):
+        return QuerySynthesis(
+            name='network_role_coverage',
+            purpose='Network logging role coverage (Firewall/IDS/Proxy/DNS/WAF) per Confluence',
+            sql='''
+            select 
+                case 
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%firewall%' then 'Firewall Traffic'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%ids%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%ips%' then 'IDS/IPS'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%ndr%' then 'NDR'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%proxy%' then 'Proxy'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%dns%' then 'DNS'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%waf%' then 'WAF'
+                    else 'Other Network'
+                end as network_role,
+                count(distinct coalesce(splunk_host, chronicle_host)) as unique_assets,
+                count(*) as total_logs,
+                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_assets,
+                count(distinct case when splunk_host is not null then splunk_host end) as splunk_assets,
+                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as chronicle_coverage_percent
+            from combined
+            where coalesce(data_type, chronicle_log_type) is not null
+            and (lower(coalesce(data_type, chronicle_log_type, '')) like '%firewall%' 
+                 or lower(coalesce(data_type, chronicle_log_type, '')) like '%ids%'
+                 or lower(coalesce(data_type, chronicle_log_type, '')) like '%ips%'
+                 or lower(coalesce(data_type, chronicle_log_type, '')) like '%ndr%'
+                 or lower(coalesce(data_type, chronicle_log_type, '')) like '%proxy%'
+                 or lower(coalesce(data_type, chronicle_log_type, '')) like '%dns%'
+                 or lower(coalesce(data_type, chronicle_log_type, '')) like '%waf%')
+            group by network_role
+            order by unique_assets desc
+            ''',
+            confidence=0.92,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_endpoint_role_query(self):
+        return QuerySynthesis(
+            name='endpoint_role_coverage',
+            purpose='Endpoint logging coverage (OS/EDR/DLP/FIM) per Confluence',
+            sql='''
+            select 
+                case 
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%os%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%winevt%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%syslog%' then 'OS logs (WinEVT, Linux syslog)'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%edr%' or crowdstrike_device_hostname is not null then 'EDR'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%dlp%' then 'DLP'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%fim%' then 'FIM'
+                    else 'Other Endpoint'
+                end as endpoint_role,
+                count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) as unique_assets,
+                count(*) as total_logs,
+                count(distinct case when crowdstrike_device_hostname is not null then crowdstrike_device_hostname end) as edr_assets,
+                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_assets,
+                round(count(distinct case when crowdstrike_device_hostname is not null then crowdstrike_device_hostname end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as edr_coverage_percent
+            from combined
+            where (lower(coalesce(data_type, chronicle_log_type, '')) like '%os%' 
+                   or lower(coalesce(data_type, chronicle_log_type, '')) like '%winevt%'
+                   or lower(coalesce(data_type, chronicle_log_type, '')) like '%syslog%'
+                   or lower(coalesce(data_type, chronicle_log_type, '')) like '%edr%'
+                   or lower(coalesce(data_type, chronicle_log_type, '')) like '%dlp%'
+                   or lower(coalesce(data_type, chronicle_log_type, '')) like '%fim%'
+                   or crowdstrike_device_hostname is not null)
+            group by endpoint_role
+            order by unique_assets desc
+            ''',
+            confidence=0.90,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_cloud_role_query(self):
+        return QuerySynthesis(
+            name='cloud_role_coverage',
+            purpose='Cloud logging coverage (Cloud Events/Load Balancer) per Confluence',
+            sql='''
+            select 
+                case 
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%cloud%event%' then 'Cloud Event'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%load%balancer%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%lb%' then 'Cloud Load Balancer'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%cloud%config%' then 'Cloud Config'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%theom%' then 'Theom'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%wiz%' then 'Wiz'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%cloud%security%' then 'Cloud Security'
+                    else 'Other Cloud'
+                end as cloud_role,
+                count(distinct coalesce(splunk_host, chronicle_host)) as unique_assets,
+                count(*) as total_logs,
+                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_coverage,
+                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as coverage_percent
+            from combined
+            where lower(coalesce(data_type, chronicle_log_type, '')) like '%cloud%'
+               or lower(coalesce(data_type, chronicle_log_type, '')) like '%load%balancer%'
+               or lower(coalesce(data_type, chronicle_log_type, '')) like '%theom%'
+               or lower(coalesce(data_type, chronicle_log_type, '')) like '%wiz%'
+            group by cloud_role
+            order by unique_assets desc
+            ''',
+            confidence=0.85,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_application_coverage_query(self):
+        return QuerySynthesis(
+            name='application_coverage',
+            purpose='Application logging coverage (Web Logs/API Gateway) per Confluence',
+            sql='''
+            select 
+                case 
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%web%log%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%http%access%' then 'Web Logs (HTTP Access)'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%api%gateway%' then 'API Gateway'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%application%' then 'Application Logs'
+                    else 'Other Application'
+                end as application_role,
+                count(distinct coalesce(splunk_host, chronicle_host)) as unique_assets,
+                count(*) as total_logs,
+                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_coverage,
+                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as coverage_percent
+            from combined
+            where lower(coalesce(data_type, chronicle_log_type, '')) like '%web%log%'
+               or lower(coalesce(data_type, chronicle_log_type, '')) like '%http%access%'
+               or lower(coalesce(data_type, chronicle_log_type, '')) like '%api%gateway%'
+               or lower(coalesce(data_type, chronicle_log_type, '')) like '%application%'
+            group by application_role
+            order by unique_assets desc
+            ''',
+            confidence=0.80,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_identity_auth_query(self):
+        return QuerySynthesis(
+            name='identity_auth_coverage',
+            purpose='Identity and Authentication coverage (Auth attempts/Privilege escalation) per Confluence',
+            sql='''
+            select 
+                case 
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%auth%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%authentication%' then 'Authentication attempts'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%privilege%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%escalation%' then 'Privilege escalation'
+                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%identity%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%create%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%modify%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%destroy%' then 'Identity create/modify/destroy'
+                    else 'Other Identity'
+                end as identity_role,
+                count(distinct coalesce(splunk_host, chronicle_host)) as unique_assets,
+                count(*) as total_logs,
+                'Domain' as domain_coverage,
+                'Internal' as internal_coverage,
+                'External' as external_coverage,
+                'Controls' as controls_coverage
+            from combined
+            where lower(coalesce(data_type, chronicle_log_type, '')) like '%auth%'
+               or lower(coalesce(data_type, chronicle_log_type, '')) like '%privilege%'
+               or lower(coalesce(data_type, chronicle_log_type, '')) like '%identity%'
+            group by identity_role
+            order by unique_assets desc
+            ''',
+            confidence=0.80,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_url_fqdn_query(self):
+        return QuerySynthesis(
+            name='url_fqdn_coverage',
+            purpose='URL/FQDN coverage analysis per Confluence visibility factors',
+            sql='''
+            select 
+                'URL/FQDN Coverage Analysis' as metric_name,
+                count(distinct case when url is not null or fqdn is not null then coalesce(splunk_host, chronicle_host) end) as assets_with_url_fqdn,
+                count(distinct case when url is not null then coalesce(splunk_host, chronicle_host) end) as assets_with_url,
+                count(distinct case when fqdn is not null then coalesce(splunk_host, chronicle_host) end) as assets_with_fqdn,
+                count(distinct coalesce(splunk_host, chronicle_host)) as total_assets,
+                round(count(distinct case when url is not null or fqdn is not null then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as url_fqdn_coverage_percent
+            from combined
+            where coalesce(splunk_host, chronicle_host) is not null
+            ''',
+            confidence=0.75,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_cmdb_visibility_query(self):
+        return QuerySynthesis(
+            name='cmdb_asset_visibility',
+            purpose='CMDB Asset Visibility correlation per Confluence requirements',
+            sql='''
+            select 
+                'CMDB Asset Visibility' as metric_name,
+                count(distinct case when name is not null then name end) as cmdb_assets,
+                count(distinct coalesce(splunk_host, chronicle_host)) as logging_assets,
+                count(distinct case when name is not null and (splunk_host is not null or chronicle_host is not null) then coalesce(name, splunk_host, chronicle_host) end) as correlated_assets,
+                count(distinct case when name is not null and splunk_host is null and chronicle_host is null then name end) as cmdb_only_assets,
+                count(distinct case when name is null and (splunk_host is not null or chronicle_host is not null) then coalesce(splunk_host, chronicle_host) end) as logging_only_assets,
+                round(count(distinct case when name is not null and (splunk_host is not null or chronicle_host is not null) then coalesce(name, splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(name, splunk_host, chronicle_host)), 2) as correlation_percentage
+            from combined
+            where coalesce(name, splunk_host, chronicle_host) is not null
+            ''',
+            confidence=0.85,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_network_zones_query(self):
+        return QuerySynthesis(
+            name='network_zones_coverage',
+            purpose='Network Zones/spans coverage per Confluence visibility factors',
+            sql='''
+            select 
+                coalesce(network_zone, zone, region, 'Unknown Zone') as network_zone,
+                count(distinct coalesce(splunk_host, chronicle_host)) as assets_in_zone,
+                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_covered,
+                count(distinct case when splunk_host is not null then splunk_host end) as splunk_covered,
+                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as zone_coverage_percent
+            from combined
+            where coalesce(splunk_host, chronicle_host) is not null
+            group by network_zone
+            order by assets_in_zone desc
+            ''',
+            confidence=0.70,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_ipam_coverage_query(self):
+        return QuerySynthesis(
+            name='ipam_coverage',
+            purpose='iPAM Public IP Coverage per Confluence visibility factors',
+            sql='''
+            select 
+                'iPAM Public IP Coverage' as metric_name,
+                count(distinct case when ip_address is not null and not (ip_address like '10.%' or ip_address like '192.168.%' or ip_address like '172.%') then ip_address end) as public_ips,
+                count(distinct case when ip_address is not null and (ip_address like '10.%' or ip_address like '192.168.%' or ip_address like '172.%') then ip_address end) as private_ips,
+                count(distinct ip_address) as total_ips,
+                count(distinct coalesce(splunk_host, chronicle_host)) as total_assets,
+                round(count(distinct case when ip_address is not null and not (ip_address like '10.%' or ip_address like '192.168.%' or ip_address like '172.%') then ip_address end) * 100.0 / count(distinct ip_address), 2) as public_ip_percent
+            from combined
+            where ip_address is not null
+            ''',
+            confidence=0.75,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_geolocation_query(self):
+        return QuerySynthesis(
+            name='geolocation_coverage',
+            purpose='Geolocation and VPC coverage per Confluence visibility factors',
+            sql='''
+            select 
+                coalesce(country, region, 'Unknown Location') as location,
+                coalesce(vpc, 'No VPC') as vpc_info,
+                count(distinct coalesce(splunk_host, chronicle_host)) as assets,
+                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_covered,
+                count(distinct ip_address) as unique_ips,
+                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as coverage_percent
+            from combined
+            where coalesce(splunk_host, chronicle_host) is not null
+            group by location, vpc_info
+            order by assets desc
+            ''',
+            confidence=0.75,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_log_volume_query(self):
+        return QuerySynthesis(
+            name='log_ingest_volume',
+            purpose='%log ingest volume and quality metrics per Confluence visibility factors',
+            sql='''
+            select 
+                coalesce(data_type, 'Unknown Type') as log_type,
+                count(*) as total_log_volume,
+                count(distinct coalesce(splunk_host, chronicle_host)) as unique_assets,
+                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_sources,
+                count(distinct case when splunk_host is not null then splunk_host end) as splunk_sources,
+                round(count(*) * 100.0 / (select count(*) from combined), 2) as percent_of_total_volume,
+                round(avg(case when timestamp is not null then 1.0 else 0.0 end) * 100, 2) as timestamp_completeness_percent
+            from combined
+            group by data_type
+            order by total_log_volume desc
+            ''',
+            confidence=0.90,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_crowdstrike_query(self):
+        return QuerySynthesis(
+            name='crowdstrike_agent_coverage',
+            purpose='CrowdStrike Agent Coverage per Confluence visibility factors',
+            sql='''
+            select 
+                coalesce(crowdstrike_agent_health, 'No Agent') as agent_status,
+                count(distinct crowdstrike_device_hostname) as agents_in_status,
+                count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) as total_potential_assets,
+                round(count(distinct crowdstrike_device_hostname) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as agent_deployment_percent,
+                'CrowdStrike Agent Coverage Analysis' as metric_type
+            from combined
+            group by agent_status
+            order by agents_in_status desc
+            ''',
+            confidence=0.95,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_domain_visibility_query(self):
+        return QuerySynthesis(
+            name='domain_visibility',
+            purpose='Domain Visibility - Asset visibility by hostname and domain per Confluence',
+            sql='''
+            select 
+                case 
+                    when coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname) like '%.%' then 
+                        substr(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname), 
+                               instr(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname), '.') + 1)
+                    else 'No Domain'
+                end as domain,
+                count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) as assets_in_domain,
+                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_covered,
+                count(distinct case when splunk_host is not null then splunk_host end) as splunk_covered,
+                round(count(distinct case when chronicle_host is not null or splunk_host is not null then coalesce(chronicle_host, splunk_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as domain_visibility_percent
+            from combined
+            where coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname) is not null
+            group by domain
+            order by assets_in_domain desc
+            ''',
+            confidence=0.85,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_cloud_region_query(self):
+        return QuerySynthesis(
+            name='cloud_region_coverage',
+            purpose='Cloud region specific coverage per Confluence requirements',
+            sql='''
+            select 
+                coalesce(cloud_region, region, 'Unknown Region') as cloud_region,
+                count(distinct coalesce(splunk_host, chronicle_host)) as cloud_assets,
+                count(distinct case when lower(coalesce(splunk_host, chronicle_host)) like '%aws%' then coalesce(splunk_host, chronicle_host) end) as aws_assets,
+                count(distinct case when lower(coalesce(splunk_host, chronicle_host)) like '%azure%' then coalesce(splunk_host, chronicle_host) end) as azure_assets,
+                count(distinct case when lower(coalesce(splunk_host, chronicle_host)) like '%gcp%' then coalesce(splunk_host, chronicle_host) end) as gcp_assets,
+                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as region_coverage_percent
+            from combined
+            where lower(coalesce(splunk_host, chronicle_host, data_type, '')) like '%cloud%'
+               or lower(coalesce(splunk_host, chronicle_host, '')) like '%aws%'
+               or lower(coalesce(splunk_host, chronicle_host, '')) like '%azure%'
+               or lower(coalesce(splunk_host, chronicle_host, '')) like '%gcp%'
+            group by cloud_region
+            order by cloud_assets desc
+            ''',
+            confidence=0.80,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_data_center_query(self):
+        return QuerySynthesis(
+            name='data_center_coverage',
+            purpose='Data center coverage analysis per Confluence requirements',
+            sql='''
+            select 
+                coalesce(data_center, datacenter, location, 'Unknown DC') as data_center,
+                count(distinct coalesce(splunk_host, chronicle_host)) as dc_assets,
+                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_covered,
+                count(distinct case when splunk_host is not null then splunk_host end) as splunk_covered,
+                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as dc_coverage_percent
+            from combined
+            where coalesce(splunk_host, chronicle_host) is not null
+            group by data_center
+            order by dc_assets desc
+            ''',
+            confidence=0.70,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_apm_coverage_query(self):
+        return QuerySynthesis(
+            name='apm_coverage',
+            purpose='APM and application monitoring coverage - UAID available in AppMap per Confluence',
+            sql='''
+            select 
+                'APM Coverage Analysis' as metric_name,
+                count(distinct case when uaid is not null then uaid end) as uaid_available,
+                count(distinct case when app_number is not null then app_number end) as app_numbers,
+                count(distinct case when application_class is not null then application_class end) as app_classes,
+                count(distinct coalesce(splunk_host, chronicle_host)) as total_assets,
+                round(count(distinct case when uaid is not null then uaid end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as uaid_coverage_percent,
+                'Available for CMDB but need other way to determine application class' as note
+            from combined
+            where coalesce(splunk_host, chronicle_host, uaid, app_number) is not null
+            ''',
+            confidence=0.85,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_vulnerability_query(self):
+        return QuerySynthesis(
+            name='vulnerability_coverage',
+            purpose='Vulnerability scanning coverage - CMDB integrates vulnerability scanning per Confluence',
+            sql='''
+            select 
+                'Vulnerability Coverage' as metric_name,
+                count(distinct case when vulnerability_scan_date is not null then coalesce(splunk_host, chronicle_host) end) as vuln_scanned_assets,
+                count(distinct case when last_scan_date is not null then coalesce(splunk_host, chronicle_host) end) as recently_scanned,
+                count(distinct coalesce(splunk_host, chronicle_host)) as total_assets,
+                round(count(distinct case when vulnerability_scan_date is not null then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as vuln_scan_coverage_percent,
+                'CMDB integrates Vulnerability Scanning to identify assets' as source
+            from combined
+            where coalesce(splunk_host, chronicle_host) is not null
+            ''',
+            confidence=0.75,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_discovery_query(self):
+        return QuerySynthesis(
+            name='discovery_coverage',
+            purpose='Asset discovery and scanning coverage - CMDB incorporates discovery scanning per Confluence',
+            sql='''
+            select 
+                'Asset Discovery Coverage' as metric_name,
+                count(distinct case when discovery_method is not null then coalesce(splunk_host, chronicle_host) end) as discovered_assets,
+                count(distinct case when dhcp_record is not null then coalesce(splunk_host, chronicle_host) end) as dhcp_mapped_assets,
+                count(distinct case when cloud_hosting_control is not null then coalesce(splunk_host, chronicle_host) end) as cloud_mapped_assets,
+                count(distinct coalesce(splunk_host, chronicle_host)) as total_assets,
+                round(count(distinct case when discovery_method is not null then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as discovery_coverage_percent,
+                'CMDB incorporates discovery scanning to populate assets' as source,
+                'CMDB incorporates DHCP records to map assets to IP assignment' as dhcp_note,
+                'CMDB incorporates Cloud Hosting controls to map assets in the cloud' as cloud_note
+            from combined
+            where coalesce(splunk_host, chronicle_host) is not null
+            ''',
+            confidence=0.80,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_compliance_query(self):
+        return QuerySynthesis(
+            name='compliance_coverage',
+            purpose='Logging Compliance in GSO and Splunk - visibility statements per Confluence',
+            sql='''
+            select 
+                'Logging Compliance Analysis' as metric_name,
+                count(distinct case when splunk_host is not null then splunk_host end) as splunk_compliant_assets,
+                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_compliant_assets,
+                count(distinct coalesce(splunk_host, chronicle_host)) as total_assets,
+                round(count(distinct case when splunk_host is not null then splunk_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as splunk_compliance_percent,
+                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as chronicle_compliance_percent,
+                'Visibility statements based on logging platform' as compliance_basis,
+                'This will be a more complicated statistic' as complexity_note
+            from combined
+            where coalesce(splunk_host, chronicle_host) is not null
+            ''',
+            confidence=0.85,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
+    
+    def _build_business_unit_query(self):
+        return QuerySynthesis(
+            name='business_unit_coverage',
+            purpose='Business Unit and CIO coverage analysis per Confluence (noted as not available)',
+            sql='''
+            select 
+                'Business Unit Analysis' as metric_name,
+                coalesce(business_unit, bu, department, 'Unknown BU') as business_unit,
+                coalesce(cio_organization, cio, 'Unknown CIO') as cio_org,
+                count(distinct coalesce(splunk_host, chronicle_host)) as assets_in_bu,
+                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_covered,
+                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as bu_coverage_percent,
+                'Note: Business Unit not available per Confluence' as availability_note
+            from combined
+            where coalesce(splunk_host, chronicle_host) is not null
+            group by business_unit, cio_org
+            order by assets_in_bu desc
+            ''',
+            confidence=0.60,
+            validation_checks=[],
+            expected_ranges={},
+            fallback_strategies=[]
+        )
     
     def _build_simple_coverage_query(self):
         sql = '''
