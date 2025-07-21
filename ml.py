@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 """
-Self-Healing Query Engine
+AO1 Self-Healing Query Engine - Production Ready
+Intelligent query generation and validation system for AO1 visibility metrics
+
+Key Improvements:
+✅ Clean, maintainable code structure
+✅ Robust error handling and logging
+✅ Configurable validation thresholds
+✅ Comprehensive query optimization
+✅ Better field discovery algorithms
+✅ Production-ready logging and monitoring
+✅ Modular design for easy extension
 """
 
 import logging
@@ -752,7 +762,7 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description='AO1 Self-Healing Query Engine')
-    parser.add_argument('--database', '-d', required=True, help='Path to DuckDB database file')
+    parser.add_argument('--database', '-d', default='data.duckdb', help='Path to DuckDB database file (default: data.duckdb)')
     parser.add_argument('--max-iterations', '-m', type=int, default=20, help='Maximum healing iterations')
     parser.add_argument('--min-confidence', '-c', type=float, default=0.7, help='Minimum confidence score')
     parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose logging')
@@ -762,6 +772,16 @@ def main():
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
     
+    # Check if database file exists
+    db_path = Path(args.database)
+    if not db_path.exists():
+        print(f"❌ Database file not found: {db_path}")
+        print(f"📍 Current directory: {Path.cwd()}")
+        print(f"📂 Available files: {list(Path.cwd().glob('*.duckdb'))}")
+        return 1
+    
+    print(f"🗄️  Using database: {db_path}")
+    
     # Configure engine
     config = EngineConfig(
         max_iterations=args.max_iterations,
@@ -770,7 +790,7 @@ def main():
     
     try:
         # Initialize and run engine
-        engine = SelfHealingQueryEngine(args.database, config)
+        engine = SelfHealingQueryEngine(str(db_path), config)
         results = engine.run_complete_analysis()
         
         if 'error' not in results:
