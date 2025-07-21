@@ -14,247 +14,37 @@ from pathlib import Path
 import duckdb
 import traceback
 from contextlib import contextmanager
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.cluster import DBSCAN, KMeans
-from sklearn.ensemble import IsolationForest, RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics.pairwise import cosine_similarity
-import scipy.stats as stats
-from difflib import SequenceMatcher
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 @dataclass
-class ContentSignature:
-    pattern_type: str
-    confidence: float
-    evidence: Dict[str, Any]
-    semantic_meaning: str
-    data_quality: float
-    synthesis_potential: float
-
-@dataclass
-class FieldIntelligence:
+class FieldMapping:
     table: str
     column: str
-    signatures: List[ContentSignature]
-    primary_type: str
+    field_type: str  # 'hostname', 'ip', 'log_type', 'region', 'status', etc.
     confidence: float
-    statistical_profile: Dict[str, float]
-    samples: List[Any]
-    reasoning: str
-    synthesis_options: List[str]
+    sample_values: List[str]
+    unique_count: int
+    total_count: int
+    patterns: List[str]
 
 @dataclass
-class QuerySynthesis:
-    name: str
-    purpose: str
-    sql: str
-    confidence: float
-    validation_checks: List[str]
-    expected_ranges: Dict[str, Tuple[float, float]]
-    fallback_strategies: List[str]
+class SchemaIntelligence:
+    tables: List[str]
+    field_mappings: Dict[str, FieldMapping]
+    hostname_fields: List[FieldMapping]
+    ip_fields: List[FieldMapping]
+    log_type_fields: List[FieldMapping]
+    region_fields: List[FieldMapping]
+    status_fields: List[FieldMapping]
+    timestamp_fields: List[FieldMapping]
 
-class BrilliantAnalyzer:
-    def __init__(self):
-        self.vectorizer = TfidfVectorizer(max_features=500, ngram_range=(1,3))
-        self.pattern_models = {}
-        self.synthesis_rules = self._build_synthesis_rules()
-        self.validation_thresholds = self._build_validation_rules()
-        
-    def _build_synthesis_rules(self):
-        return {
-            'host_identity': {
-                'primary_indicators': [
-                    (lambda x: re.match(r'^[a-zA-Z0-9\-\.]+$', str(x)) and 3 <= len(str(x)) <= 50, 0.8),
-                    (lambda x: '.' in str(x) and not str(x).replace('.','').isdigit(), 0.6),
-                    (lambda x: '-' in str(x) and len(str(x).split('-')) >= 2, 0.5),
-                    (lambda x: any(c.isalpha() for c in str(x)) and any(c.isdigit() for c in str(x)), 0.4)
-                ],
-                'synthesis_from': ['ip_to_hostname', 'url_to_host', 'fqdn_extraction', 'log_source_parsing'],
-                'validation': lambda vals: len(set(vals)) / len(vals) > 0.7 if vals else 0
-            },
-            'network_logs': {
-                'primary_indicators': [
-                    (lambda x: any(term in str(x).lower() for term in ['firewall', 'proxy', 'dns', 'ids', 'ips', 'ndr', 'waf']), 0.9),
-                    (lambda x: any(term in str(x).lower() for term in ['traffic', 'network', 'connection', 'flow']), 0.7),
-                    (lambda x: any(term in str(x).lower() for term in ['router', 'switch', 'gateway', 'vpn']), 0.6),
-                    (lambda x: re.search(r'(tcp|udp|http|https|ssl|tls)', str(x).lower()), 0.5)
-                ],
-                'synthesis_from': ['log_type_extraction', 'source_classification', 'protocol_analysis'],
-                'validation': lambda vals: len([v for v in vals if any(term in str(v).lower() for term in ['firewall', 'proxy', 'dns'])]) > 0
-            },
-            'endpoint_logs': {
-                'primary_indicators': [
-                    (lambda x: any(term in str(x).lower() for term in ['windows', 'linux', 'macos', 'win', 'unix']), 0.8),
-                    (lambda x: any(term in str(x).lower() for term in ['edr', 'endpoint', 'workstation', 'desktop', 'laptop']), 0.7),
-                    (lambda x: any(term in str(x).lower() for term in ['dlp', 'fim', 'antivirus', 'av']), 0.6),
-                    (lambda x: any(term in str(x).lower() for term in ['syslog', 'event', 'log']), 0.4)
-                ],
-                'synthesis_from': ['os_detection', 'agent_classification', 'event_type_analysis'],
-                'validation': lambda vals: len([v for v in vals if any(term in str(v).lower() for term in ['windows', 'linux', 'edr'])]) > 0
-            },
-            'agent_status': {
-                'primary_indicators': [
-                    (lambda x: str(x).lower() in ['healthy', 'unhealthy', 'active', 'inactive', 'online', 'offline'], 0.9),
-                    (lambda x: str(x).lower() in ['up', 'down', 'ok', 'error', 'good', 'bad'], 0.7),
-                    (lambda x: str(x).lower() in ['running', 'stopped', 'enabled', 'disabled'], 0.6),
-                    (lambda x: re.match(r'^(true|false|0|1)$', str(x).lower()), 0.3)
-                ],
-                'synthesis_from': ['health_derivation', 'connectivity_analysis', 'timestamp_freshness'],
-                'validation': lambda vals: len(set(str(v).lower() for v in vals)) <= 10 and len(vals) > 0
-            },
-            'infrastructure_type': {
-                'primary_indicators': [
-                    (lambda x: any(term in str(x).lower() for term in ['cloud', 'aws', 'azure', 'gcp', 'on-prem', 'physical']), 0.8),
-                    (lambda x: any(term in str(x).lower() for term in ['virtual', 'vm', 'container', 'docker', 'kubernetes']), 0.7),
-                    (lambda x: any(term in str(x).lower() for term in ['saas', 'api', 'service', 'platform']), 0.6),
-                    (lambda x: any(term in str(x).lower() for term in ['server', 'desktop', 'mobile', 'iot']), 0.4)
-                ],
-                'synthesis_from': ['hostname_analysis', 'ip_classification', 'deployment_inference'],
-                'validation': lambda vals: len(set(str(v).lower() for v in vals)) <= 20
-            },
-            'geographic_data': {
-                'primary_indicators': [
-                    (lambda x: any(country in str(x).lower() for country in ['us', 'usa', 'uk', 'ca', 'de', 'fr', 'jp', 'au']), 0.8),
-                    (lambda x: any(region in str(x).lower() for region in ['north america', 'europe', 'asia', 'emea', 'apac']), 0.7),
-                    (lambda x: re.match(r'^[A-Z]{2}$', str(x).upper()), 0.6),
-                    (lambda x: any(city in str(x).lower() for city in ['new york', 'london', 'tokyo', 'sydney']), 0.5)
-                ],
-                'synthesis_from': ['ip_geolocation', 'timezone_analysis', 'domain_analysis'],
-                'validation': lambda vals: len(set(str(v).lower() for v in vals)) <= 50
-            }
-        }
-    
-    def _build_validation_rules(self):
-        return {
-            'coverage_percentage': (0, 100),
-            'asset_count': (1, 1000000),
-            'unique_ratio': (0, 1),
-            'null_percentage': (0, 100),
-            'log_volume': (0, float('inf')),
-            'response_time': (0, 300)
-        }
-    
-    def analyze_content_brilliantly(self, samples: List[Any]) -> List[ContentSignature]:
-        if not samples:
-            return []
-        
-        signatures = []
-        clean_samples = [str(s).strip() for s in samples if s is not None and str(s).strip()]
-        
-        if not clean_samples:
-            return []
-        
-        for pattern_type, rules in self.synthesis_rules.items():
-            total_score = 0
-            evidence = {}
-            
-            for indicator, weight in rules['primary_indicators']:
-                matches = sum(1 for sample in clean_samples if indicator(sample))
-                score = (matches / len(clean_samples)) * weight
-                total_score += score
-                evidence[f'indicator_matches'] = matches
-                evidence[f'total_samples'] = len(clean_samples)
-            
-            if total_score > 0.3:
-                quality_score = self._calculate_data_quality(clean_samples)
-                synthesis_potential = self._calculate_synthesis_potential(clean_samples, pattern_type)
-                
-                signatures.append(ContentSignature(
-                    pattern_type=pattern_type,
-                    confidence=min(total_score, 1.0),
-                    evidence=evidence,
-                    semantic_meaning=self._derive_semantic_meaning(clean_samples, pattern_type),
-                    data_quality=quality_score,
-                    synthesis_potential=synthesis_potential
-                ))
-        
-        return sorted(signatures, key=lambda x: x.confidence * x.data_quality, reverse=True)
-    
-    def _calculate_data_quality(self, samples: List[str]) -> float:
-        if not samples:
-            return 0.0
-        
-        quality_factors = []
-        
-        non_empty = len([s for s in samples if s and s.strip()])
-        quality_factors.append(non_empty / len(samples))
-        
-        unique_ratio = len(set(samples)) / len(samples)
-        quality_factors.append(min(unique_ratio * 2, 1.0))
-        
-        avg_length = np.mean([len(s) for s in samples])
-        length_score = min(avg_length / 20, 1.0) if avg_length > 0 else 0
-        quality_factors.append(length_score)
-        
-        consistency_score = self._calculate_consistency(samples)
-        quality_factors.append(consistency_score)
-        
-        return np.mean(quality_factors)
-    
-    def _calculate_consistency(self, samples: List[str]) -> float:
-        if len(samples) < 2:
-            return 1.0
-        
-        length_variance = np.var([len(s) for s in samples])
-        length_consistency = max(0, 1 - (length_variance / 100))
-        
-        format_patterns = defaultdict(int)
-        for sample in samples:
-            pattern = re.sub(r'[a-zA-Z]', 'A', re.sub(r'\d', '9', sample))
-            format_patterns[pattern] += 1
-        
-        most_common_pattern_freq = max(format_patterns.values()) if format_patterns else 0
-        format_consistency = most_common_pattern_freq / len(samples)
-        
-        return (length_consistency + format_consistency) / 2
-    
-    def _calculate_synthesis_potential(self, samples: List[str], pattern_type: str) -> float:
-        rules = self.synthesis_rules.get(pattern_type, {})
-        synthesis_options = rules.get('synthesis_from', [])
-        
-        potential_score = 0
-        
-        if 'ip_to_hostname' in synthesis_options:
-            ip_pattern_matches = sum(1 for s in samples if re.search(r'\d+\.\d+\.\d+\.\d+', s))
-            potential_score += (ip_pattern_matches / len(samples)) * 0.3
-        
-        if 'log_type_extraction' in synthesis_options:
-            structured_matches = sum(1 for s in samples if ':' in s or '=' in s)
-            potential_score += (structured_matches / len(samples)) * 0.4
-        
-        if 'hostname_analysis' in synthesis_options:
-            domain_matches = sum(1 for s in samples if '.' in s and not s.replace('.','').isdigit())
-            potential_score += (domain_matches / len(samples)) * 0.3
-        
-        return min(potential_score, 1.0)
-    
-    def _derive_semantic_meaning(self, samples: List[str], pattern_type: str) -> str:
-        sample_preview = samples[:3]
-        
-        meanings = {
-            'host_identity': f"Asset identifiers like: {sample_preview}",
-            'network_logs': f"Network security log types: {sample_preview}",
-            'endpoint_logs': f"Endpoint security events: {sample_preview}",
-            'agent_status': f"Security agent health states: {sample_preview}",
-            'infrastructure_type': f"Infrastructure classifications: {sample_preview}",
-            'geographic_data': f"Geographic/location data: {sample_preview}"
-        }
-        
-        return meanings.get(pattern_type, f"Data pattern in: {sample_preview}")
-
-class BrilliantQueryEngine:
+class IntelligentAO1Engine:
     def __init__(self, db_path: str):
         self.db_path = Path(db_path)
         self.connection = None
-        self.analyzer = BrilliantAnalyzer()
-        self.field_intelligence = {}
-        self.query_syntheses = {}
-        self.validation_results = {}
-        self.healing_iterations = 0
-        self.max_healing_cycles = 100
+        self.schema_intel = None
         
     @contextmanager
     def db_connection(self):
@@ -266,57 +56,135 @@ class BrilliantQueryEngine:
                 self.connection.close()
                 self.connection = None
     
-    def discover_all_content_intelligence(self):
-        logger.info("🧠 BRILLIANT CONTENT INTELLIGENCE DISCOVERY")
+    def discover_actual_schema(self) -> SchemaIntelligence:
+        """Discover the actual schema and intelligently map fields to AO1 concepts"""
+        logger.info("🔍 DISCOVERING ACTUAL DATABASE SCHEMA")
         
         with self.db_connection():
-            tables = self._discover_tables()
+            # Get all tables
+            tables = self._get_tables()
+            logger.info(f"📊 Found tables: {tables}")
+            
+            all_mappings = {}
+            hostname_fields = []
+            ip_fields = []
+            log_type_fields = []
+            region_fields = []
+            status_fields = []
+            timestamp_fields = []
             
             for table in tables:
-                logger.info(f"📊 Analyzing table: {table}")
                 columns = self._get_columns(table)
+                logger.info(f"🔎 Analyzing {table}: {len(columns)} columns")
                 
                 for column in columns:
-                    samples = self._get_samples(table, column, 300)
-                    if samples:
-                        signatures = self.analyzer.analyze_content_brilliantly(samples)
+                    mapping = self._analyze_field_intelligence(table, column)
+                    if mapping:
+                        key = f"{table}.{column}"
+                        all_mappings[key] = mapping
                         
-                        if signatures:
-                            primary_sig = signatures[0]
-                            stats = self._calculate_statistical_profile(samples)
-                            
-                            intelligence = FieldIntelligence(
-                                table=table,
-                                column=column,
-                                signatures=signatures,
-                                primary_type=primary_sig.pattern_type,
-                                confidence=primary_sig.confidence * primary_sig.data_quality,
-                                statistical_profile=stats,
-                                samples=samples[:5],
-                                reasoning=f"Detected {primary_sig.pattern_type} with {primary_sig.confidence:.3f} confidence",
-                                synthesis_options=self._generate_synthesis_options(signatures)
-                            )
-                            
-                            self.field_intelligence[f"{table}.{column}"] = intelligence
-                            
-                            if intelligence.confidence > 0.4:
-                                logger.info(f"   🎯 {column}: {primary_sig.pattern_type} ({intelligence.confidence:.3f})")
+                        # Categorize by field type
+                        if mapping.field_type == 'hostname':
+                            hostname_fields.append(mapping)
+                        elif mapping.field_type == 'ip':
+                            ip_fields.append(mapping)
+                        elif mapping.field_type == 'log_type':
+                            log_type_fields.append(mapping)
+                        elif mapping.field_type == 'region':
+                            region_fields.append(mapping)
+                        elif mapping.field_type == 'status':
+                            status_fields.append(mapping)
+                        elif mapping.field_type == 'timestamp':
+                            timestamp_fields.append(mapping)
+            
+            self.schema_intel = SchemaIntelligence(
+                tables=tables,
+                field_mappings=all_mappings,
+                hostname_fields=sorted(hostname_fields, key=lambda x: x.confidence, reverse=True),
+                ip_fields=sorted(ip_fields, key=lambda x: x.confidence, reverse=True),
+                log_type_fields=sorted(log_type_fields, key=lambda x: x.confidence, reverse=True),
+                region_fields=sorted(region_fields, key=lambda x: x.confidence, reverse=True),
+                status_fields=sorted(status_fields, key=lambda x: x.confidence, reverse=True),
+                timestamp_fields=sorted(timestamp_fields, key=lambda x: x.confidence, reverse=True)
+            )
+            
+            logger.info(f"🧠 SCHEMA INTELLIGENCE SUMMARY:")
+            logger.info(f"   📡 Hostname fields: {len(hostname_fields)}")
+            logger.info(f"   🌐 IP fields: {len(ip_fields)}")
+            logger.info(f"   📋 Log type fields: {len(log_type_fields)}")
+            logger.info(f"   🌍 Region fields: {len(region_fields)}")
+            logger.info(f"   ⚡ Status fields: {len(status_fields)}")
+            logger.info(f"   ⏰ Timestamp fields: {len(timestamp_fields)}")
+            
+            return self.schema_intel
     
-    def _discover_tables(self):
+    def _get_tables(self) -> List[str]:
+        """Get all table names"""
         try:
             result = self.connection.execute("SHOW TABLES").fetchall()
             return [row[0] for row in result]
-        except:
-            return ['all_sources', 'combined', 'main', 'data']
+        except Exception as e:
+            logger.warning(f"Could not get tables: {e}")
+            # Try alternative methods
+            possible_tables = ['combined', 'all_sources', 'main', 'data']
+            existing = []
+            for table in possible_tables:
+                try:
+                    self.connection.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
+                    existing.append(table)
+                except:
+                    continue
+            return existing
     
-    def _get_columns(self, table):
+    def _get_columns(self, table: str) -> List[str]:
+        """Get all column names for a table"""
         try:
             result = self.connection.execute(f"DESCRIBE {table}").fetchall()
             return [row[0] for row in result]
-        except:
-            return []
+        except Exception as e:
+            try:
+                # Alternative method
+                result = self.connection.execute(f"SELECT * FROM {table} LIMIT 0").description
+                return [col[0] for col in result]
+            except:
+                logger.warning(f"Could not get columns for {table}: {e}")
+                return []
     
-    def _get_samples(self, table, column, limit=300):
+    def _analyze_field_intelligence(self, table: str, column: str) -> Optional[FieldMapping]:
+        """Analyze a field to determine its semantic meaning for AO1"""
+        
+        # Get sample data
+        samples = self._get_sample_data(table, column, limit=200)
+        if not samples:
+            return None
+        
+        # Clean samples
+        clean_samples = [str(s).strip() for s in samples if s is not None and str(s).strip()]
+        if not clean_samples:
+            return None
+        
+        unique_count = len(set(clean_samples))
+        total_count = len(clean_samples)
+        
+        # Analyze patterns and determine field type
+        field_type, confidence, patterns = self._classify_field_type(column, clean_samples)
+        
+        if confidence < 0.3:
+            return None
+        
+        return FieldMapping(
+            table=table,
+            column=column,
+            field_type=field_type,
+            confidence=confidence,
+            sample_values=clean_samples[:5],
+            unique_count=unique_count,
+            total_count=total_count,
+            patterns=patterns
+        )
+    
+    def _get_sample_data(self, table: str, column: str, limit: int = 200) -> List[Any]:
+        """Get sample data from a column"""
         queries = [
             f'SELECT DISTINCT "{column}" FROM "{table}" WHERE "{column}" IS NOT NULL LIMIT {limit}',
             f'SELECT DISTINCT {column} FROM {table} WHERE {column} IS NOT NULL LIMIT {limit}',
@@ -328,1547 +196,712 @@ class BrilliantQueryEngine:
             try:
                 result = self.connection.execute(query).fetchall()
                 return [row[0] for row in result if row[0] is not None]
-            except:
+            except Exception as e:
                 continue
+        
+        logger.debug(f"Could not get samples for {table}.{column}")
         return []
     
-    def _calculate_statistical_profile(self, samples):
-        if not samples:
-            return {}
+    def _classify_field_type(self, column_name: str, samples: List[str]) -> Tuple[str, float, List[str]]:
+        """Classify what type of field this is for AO1 purposes"""
         
-        str_samples = [str(s) for s in samples]
+        column_lower = column_name.lower()
+        patterns = []
         
-        return {
-            'count': len(samples),
-            'unique_count': len(set(str_samples)),
-            'uniqueness_ratio': len(set(str_samples)) / len(str_samples),
-            'avg_length': np.mean([len(s) for s in str_samples]),
-            'length_variance': np.var([len(s) for s in str_samples]),
-            'null_ratio': sum(1 for s in samples if not s or str(s).strip() == '') / len(samples)
-        }
+        # Hostname detection
+        if self._is_hostname_field(column_lower, samples):
+            confidence = self._calculate_hostname_confidence(samples)
+            patterns = self._extract_hostname_patterns(samples)
+            return 'hostname', confidence, patterns
+        
+        # IP address detection
+        if self._is_ip_field(column_lower, samples):
+            confidence = self._calculate_ip_confidence(samples)
+            patterns = self._extract_ip_patterns(samples)
+            return 'ip', confidence, patterns
+        
+        # Log type detection
+        if self._is_log_type_field(column_lower, samples):
+            confidence = self._calculate_log_type_confidence(samples)
+            patterns = self._extract_log_type_patterns(samples)
+            return 'log_type', confidence, patterns
+        
+        # Region/geographic detection
+        if self._is_region_field(column_lower, samples):
+            confidence = self._calculate_region_confidence(samples)
+            patterns = self._extract_region_patterns(samples)
+            return 'region', confidence, patterns
+        
+        # Status/health detection
+        if self._is_status_field(column_lower, samples):
+            confidence = self._calculate_status_confidence(samples)
+            patterns = self._extract_status_patterns(samples)
+            return 'status', confidence, patterns
+        
+        # Timestamp detection
+        if self._is_timestamp_field(column_lower, samples):
+            confidence = self._calculate_timestamp_confidence(samples)
+            patterns = self._extract_timestamp_patterns(samples)
+            return 'timestamp', confidence, patterns
+        
+        return 'unknown', 0.0, []
     
-    def _generate_synthesis_options(self, signatures):
-        options = []
-        for sig in signatures:
-            rules = self.analyzer.synthesis_rules.get(sig.pattern_type, {})
-            options.extend(rules.get('synthesis_from', []))
-        return list(set(options))
+    def _is_hostname_field(self, column_name: str, samples: List[str]) -> bool:
+        """Check if this looks like a hostname field"""
+        hostname_indicators = [
+            'host', 'hostname', 'device', 'server', 'machine', 
+            'computer', 'node', 'endpoint', 'asset', 'system'
+        ]
+        
+        # Check column name
+        if any(indicator in column_name for indicator in hostname_indicators):
+            return True
+        
+        # Check sample patterns
+        hostname_like = 0
+        for sample in samples[:20]:
+            if self._looks_like_hostname(sample):
+                hostname_like += 1
+        
+        return hostname_like > len(samples[:20]) * 0.3
     
-    def synthesize_brilliant_queries(self):
-        logger.info("⚡ SYNTHESIZING ALL AO1 CONFLUENCE REQUIREMENTS")
+    def _looks_like_hostname(self, value: str) -> bool:
+        """Check if a value looks like a hostname"""
+        if not isinstance(value, str) or len(value) < 3:
+            return False
+        
+        # Basic hostname patterns
+        if re.match(r'^[a-zA-Z0-9\-\.]+$', value):
+            if '.' in value and not value.replace('.', '').isdigit():
+                return True
+            if '-' in value and any(c.isalpha() for c in value):
+                return True
+            if any(c.isalpha() for c in value) and len(value) > 3:
+                return True
+        
+        return False
+    
+    def _calculate_hostname_confidence(self, samples: List[str]) -> float:
+        """Calculate confidence that these are hostnames"""
+        hostname_count = sum(1 for s in samples if self._looks_like_hostname(s))
+        base_confidence = hostname_count / len(samples)
+        
+        # Boost confidence based on patterns
+        has_domains = any('.' in s and not s.replace('.', '').isdigit() for s in samples)
+        has_dashes = any('-' in s for s in samples)
+        reasonable_length = np.mean([len(s) for s in samples]) > 5
+        
+        if has_domains:
+            base_confidence += 0.2
+        if has_dashes:
+            base_confidence += 0.1
+        if reasonable_length:
+            base_confidence += 0.1
+        
+        return min(base_confidence, 1.0)
+    
+    def _extract_hostname_patterns(self, samples: List[str]) -> List[str]:
+        """Extract hostname patterns for analysis"""
+        patterns = []
+        
+        # Domain patterns
+        domains = set()
+        for sample in samples:
+            if '.' in sample and not sample.replace('.', '').isdigit():
+                parts = sample.split('.')
+                if len(parts) > 1:
+                    domains.add('.'.join(parts[-2:]))  # Last two parts
+        
+        if domains:
+            patterns.append(f"Domains: {', '.join(list(domains)[:5])}")
+        
+        # Naming conventions
+        if any('-' in s for s in samples):
+            patterns.append("Uses hyphen naming convention")
+        
+        # Length analysis
+        avg_length = np.mean([len(s) for s in samples])
+        patterns.append(f"Average length: {avg_length:.1f} characters")
+        
+        return patterns
+    
+    def _is_ip_field(self, column_name: str, samples: List[str]) -> bool:
+        """Check if this looks like an IP field"""
+        ip_indicators = ['ip', 'addr', 'address', 'src', 'dst', 'source', 'dest']
+        
+        if any(indicator in column_name for indicator in ip_indicators):
+            return True
+        
+        ip_count = sum(1 for s in samples if self._looks_like_ip(s))
+        return ip_count > len(samples) * 0.5
+    
+    def _looks_like_ip(self, value: str) -> bool:
+        """Check if a value looks like an IP address"""
+        if not isinstance(value, str):
+            return False
+        
+        # IPv4 pattern
+        ipv4_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
+        if re.match(ipv4_pattern, value):
+            parts = value.split('.')
+            return all(0 <= int(part) <= 255 for part in parts)
+        
+        # IPv6 pattern (basic)
+        if ':' in value and len(value) > 10:
+            return True
+        
+        return False
+    
+    def _calculate_ip_confidence(self, samples: List[str]) -> float:
+        """Calculate confidence that these are IP addresses"""
+        ip_count = sum(1 for s in samples if self._looks_like_ip(s))
+        return ip_count / len(samples)
+    
+    def _extract_ip_patterns(self, samples: List[str]) -> List[str]:
+        """Extract IP patterns"""
+        patterns = []
+        
+        # Network ranges
+        private_count = sum(1 for s in samples if self._is_private_ip(s))
+        if private_count > 0:
+            patterns.append(f"Private IPs: {private_count}/{len(samples)}")
+        
+        # IPv6 count
+        ipv6_count = sum(1 for s in samples if ':' in s)
+        if ipv6_count > 0:
+            patterns.append(f"IPv6 addresses: {ipv6_count}")
+        
+        return patterns
+    
+    def _is_private_ip(self, ip: str) -> bool:
+        """Check if IP is in private range"""
+        if not self._looks_like_ip(ip):
+            return False
+        
+        private_ranges = ['10.', '192.168.', '172.']
+        return any(ip.startswith(range_start) for range_start in private_ranges)
+    
+    def _is_log_type_field(self, column_name: str, samples: List[str]) -> bool:
+        """Check if this looks like a log type field"""
+        log_indicators = ['type', 'source', 'category', 'kind', 'event', 'log']
+        
+        if any(indicator in column_name for indicator in log_indicators):
+            return True
+        
+        # Check for log-like values
+        log_terms = [
+            'firewall', 'dns', 'proxy', 'web', 'auth', 'syslog', 'windows',
+            'linux', 'network', 'security', 'audit', 'access', 'error'
+        ]
+        
+        log_like_count = 0
+        for sample in samples:
+            if any(term in str(sample).lower() for term in log_terms):
+                log_like_count += 1
+        
+        return log_like_count > len(samples) * 0.3
+    
+    def _calculate_log_type_confidence(self, samples: List[str]) -> float:
+        """Calculate confidence for log type field"""
+        log_terms = [
+            'firewall', 'dns', 'proxy', 'web', 'auth', 'syslog', 'windows',
+            'linux', 'network', 'security', 'audit', 'access', 'error',
+            'edr', 'endpoint', 'dlp', 'ids', 'ips', 'waf'
+        ]
+        
+        matches = sum(1 for s in samples if any(term in str(s).lower() for term in log_terms))
+        base_confidence = matches / len(samples)
+        
+        # Boost if we have good variety but not too much
+        unique_ratio = len(set(samples)) / len(samples)
+        if 0.1 < unique_ratio < 0.8:  # Good variety but not random
+            base_confidence += 0.2
+        
+        return min(base_confidence, 1.0)
+    
+    def _extract_log_type_patterns(self, samples: List[str]) -> List[str]:
+        """Extract log type patterns"""
+        patterns = []
+        
+        # Count by category
+        categories = defaultdict(int)
+        for sample in samples:
+            sample_lower = str(sample).lower()
+            if 'firewall' in sample_lower:
+                categories['firewall'] += 1
+            elif 'dns' in sample_lower:
+                categories['dns'] += 1
+            elif 'web' in sample_lower or 'http' in sample_lower:
+                categories['web'] += 1
+            elif 'auth' in sample_lower:
+                categories['auth'] += 1
+            elif 'windows' in sample_lower or 'win' in sample_lower:
+                categories['windows'] += 1
+            elif 'linux' in sample_lower:
+                categories['linux'] += 1
+        
+        if categories:
+            top_categories = sorted(categories.items(), key=lambda x: x[1], reverse=True)[:3]
+            patterns.append(f"Top types: {', '.join([f'{k}({v})' for k, v in top_categories])}")
+        
+        return patterns
+    
+    def _is_region_field(self, column_name: str, samples: List[str]) -> bool:
+        """Check if this looks like a region field"""
+        region_indicators = ['region', 'country', 'location', 'geo', 'zone', 'area']
+        
+        if any(indicator in column_name for indicator in region_indicators):
+            return True
+        
+        # Check for geographic values
+        geo_terms = [
+            'us', 'usa', 'uk', 'ca', 'de', 'fr', 'jp', 'au', 'north', 'south',
+            'east', 'west', 'america', 'europe', 'asia', 'pacific'
+        ]
+        
+        geo_count = sum(1 for s in samples if any(term in str(s).lower() for term in geo_terms))
+        return geo_count > len(samples) * 0.3
+    
+    def _calculate_region_confidence(self, samples: List[str]) -> float:
+        """Calculate confidence for region field"""
+        geo_terms = [
+            'us', 'usa', 'uk', 'ca', 'de', 'fr', 'jp', 'au', 'north', 'south',
+            'east', 'west', 'america', 'europe', 'asia', 'pacific', 'emea', 'apac'
+        ]
+        
+        matches = sum(1 for s in samples if any(term in str(s).lower() for term in geo_terms))
+        return matches / len(samples)
+    
+    def _extract_region_patterns(self, samples: List[str]) -> List[str]:
+        """Extract region patterns"""
+        patterns = []
+        
+        # Count regions
+        regions = Counter(str(s).lower() for s in samples)
+        top_regions = regions.most_common(3)
+        
+        if top_regions:
+            patterns.append(f"Top regions: {', '.join([f'{r}({c})' for r, c in top_regions])}")
+        
+        return patterns
+    
+    def _is_status_field(self, column_name: str, samples: List[str]) -> bool:
+        """Check if this looks like a status field"""
+        status_indicators = ['status', 'state', 'health', 'condition', 'active', 'enabled']
+        
+        if any(indicator in column_name for indicator in status_indicators):
+            return True
+        
+        # Check for status-like values
+        status_terms = [
+            'active', 'inactive', 'enabled', 'disabled', 'up', 'down',
+            'online', 'offline', 'healthy', 'unhealthy', 'ok', 'error',
+            'good', 'bad', 'running', 'stopped', 'true', 'false'
+        ]
+        
+        status_count = sum(1 for s in samples if str(s).lower() in status_terms)
+        return status_count > len(samples) * 0.5
+    
+    def _calculate_status_confidence(self, samples: List[str]) -> float:
+        """Calculate confidence for status field"""
+        status_terms = [
+            'active', 'inactive', 'enabled', 'disabled', 'up', 'down',
+            'online', 'offline', 'healthy', 'unhealthy', 'ok', 'error',
+            'good', 'bad', 'running', 'stopped', 'true', 'false', '1', '0'
+        ]
+        
+        matches = sum(1 for s in samples if str(s).lower() in status_terms)
+        base_confidence = matches / len(samples)
+        
+        # Boost if low cardinality (typical for status fields)
+        unique_count = len(set(str(s).lower() for s in samples))
+        if unique_count <= 10:
+            base_confidence += 0.3
+        
+        return min(base_confidence, 1.0)
+    
+    def _extract_status_patterns(self, samples: List[str]) -> List[str]:
+        """Extract status patterns"""
+        patterns = []
+        
+        status_counts = Counter(str(s).lower() for s in samples)
+        patterns.append(f"Status values: {dict(status_counts.most_common(5))}")
+        
+        return patterns
+    
+    def _is_timestamp_field(self, column_name: str, samples: List[str]) -> bool:
+        """Check if this looks like a timestamp field"""
+        time_indicators = ['time', 'date', 'timestamp', 'created', 'updated', 'last']
+        
+        if any(indicator in column_name for indicator in time_indicators):
+            return True
+        
+        # Check for timestamp-like values
+        timestamp_count = sum(1 for s in samples if self._looks_like_timestamp(s))
+        return timestamp_count > len(samples) * 0.5
+    
+    def _looks_like_timestamp(self, value: str) -> bool:
+        """Check if value looks like a timestamp"""
+        if not isinstance(value, str):
+            return False
+        
+        # Common timestamp patterns
+        timestamp_patterns = [
+            r'\d{4}-\d{2}-\d{2}',  # YYYY-MM-DD
+            r'\d{2}/\d{2}/\d{4}',  # MM/DD/YYYY
+            r'\d{4}/\d{2}/\d{2}',  # YYYY/MM/DD
+            r'\d{10,13}',          # Unix timestamp
+        ]
+        
+        return any(re.search(pattern, value) for pattern in timestamp_patterns)
+    
+    def _calculate_timestamp_confidence(self, samples: List[str]) -> float:
+        """Calculate confidence for timestamp field"""
+        timestamp_count = sum(1 for s in samples if self._looks_like_timestamp(s))
+        return timestamp_count / len(samples)
+    
+    def _extract_timestamp_patterns(self, samples: List[str]) -> List[str]:
+        """Extract timestamp patterns"""
+        patterns = []
+        
+        # Identify format
+        has_iso = any('-' in str(s) and len(str(s)) > 8 for s in samples)
+        has_slash = any('/' in str(s) for s in samples)
+        has_unix = any(str(s).isdigit() and len(str(s)) >= 10 for s in samples)
+        
+        formats = []
+        if has_iso:
+            formats.append("ISO format")
+        if has_slash:
+            formats.append("slash format") 
+        if has_unix:
+            formats.append("Unix timestamp")
+        
+        if formats:
+            patterns.append(f"Formats: {', '.join(formats)}")
+        
+        return patterns
+    
+    def generate_intelligent_ao1_queries(self) -> Dict[str, str]:
+        """Generate AO1 queries based on actual discovered schema"""
+        
+        if not self.schema_intel:
+            raise ValueError("Must run discover_actual_schema() first")
+        
+        logger.info("⚡ GENERATING INTELLIGENT AO1 QUERIES")
+        
+        queries = {}
+        
+        # Use the best fields we found for each query type
+        primary_hostname = self.schema_intel.hostname_fields[0] if self.schema_intel.hostname_fields else None
+        primary_log_type = self.schema_intel.log_type_fields[0] if self.schema_intel.log_type_fields else None
+        primary_region = self.schema_intel.region_fields[0] if self.schema_intel.region_fields else None
+        primary_status = self.schema_intel.status_fields[0] if self.schema_intel.status_fields else None
+        primary_ip = self.schema_intel.ip_fields[0] if self.schema_intel.ip_fields else None
+        
+        # 1. Global Asset Coverage
+        if primary_hostname:
+            queries['global_asset_coverage'] = f"""
+-- Global Asset Coverage (Based on discovered hostname field: {primary_hostname.table}.{primary_hostname.column})
+SELECT 
+    'Global Asset Coverage' as metric_name,
+    COUNT(DISTINCT {primary_hostname.column}) as total_unique_assets,
+    COUNT(*) as total_records,
+    ROUND(COUNT(DISTINCT {primary_hostname.column}) * 100.0 / COUNT(*), 2) as asset_to_record_ratio
+FROM {primary_hostname.table}
+WHERE {primary_hostname.column} IS NOT NULL;
+"""
+        
+        # 2. Infrastructure Type Coverage
+        if primary_hostname:
+            queries['infrastructure_type_coverage'] = f"""
+-- Infrastructure Type Coverage (Based on hostname patterns in {primary_hostname.table}.{primary_hostname.column})
+SELECT 
+    CASE 
+        WHEN LOWER({primary_hostname.column}) LIKE '%cloud%' OR LOWER({primary_hostname.column}) LIKE '%aws%' 
+             OR LOWER({primary_hostname.column}) LIKE '%azure%' OR LOWER({primary_hostname.column}) LIKE '%gcp%' THEN 'Cloud'
+        WHEN LOWER({primary_hostname.column}) LIKE '%vm%' OR LOWER({primary_hostname.column}) LIKE '%virtual%' THEN 'Virtual'
+        WHEN LOWER({primary_hostname.column}) LIKE '%server%' THEN 'Server'
+        WHEN LOWER({primary_hostname.column}) LIKE '%desktop%' OR LOWER({primary_hostname.column}) LIKE '%laptop%' THEN 'Endpoint'
+        ELSE 'Other'
+    END as infrastructure_type,
+    COUNT(DISTINCT {primary_hostname.column}) as asset_count,
+    ROUND(COUNT(DISTINCT {primary_hostname.column}) * 100.0 / 
+          (SELECT COUNT(DISTINCT {primary_hostname.column}) FROM {primary_hostname.table} WHERE {primary_hostname.column} IS NOT NULL), 2) as percentage
+FROM {primary_hostname.table}
+WHERE {primary_hostname.column} IS NOT NULL
+GROUP BY infrastructure_type
+ORDER BY asset_count DESC;
+"""
+        
+        # 3. Regional Coverage (if we found region data)
+        if primary_region:
+            queries['regional_coverage'] = f"""
+-- Regional Coverage Analysis (Based on {primary_region.table}.{primary_region.column})
+SELECT 
+    {primary_region.column} as region,
+    COUNT(DISTINCT {primary_hostname.column if primary_hostname else '*'}) as assets_in_region,
+    COUNT(*) as total_logs,
+    ROUND(COUNT(DISTINCT {primary_hostname.column if primary_hostname else '*'}) * 100.0 / 
+          (SELECT COUNT(DISTINCT {primary_hostname.column if primary_hostname else '*'}) FROM {primary_region.table}), 2) as region_percentage
+FROM {primary_region.table}
+WHERE {primary_region.column} IS NOT NULL
+GROUP BY {primary_region.column}
+ORDER BY assets_in_region DESC;
+"""
+        
+        # 4. Log Type Coverage
+        if primary_log_type:
+            queries['log_type_coverage'] = f"""
+-- Log Type Coverage (Based on {primary_log_type.table}.{primary_log_type.column})
+SELECT 
+    {primary_log_type.column} as log_type,
+    COUNT(DISTINCT {primary_hostname.column if primary_hostname else '*'}) as assets_with_this_log_type,
+    COUNT(*) as total_logs_of_type,
+    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM {primary_log_type.table}), 2) as log_volume_percentage
+FROM {primary_log_type.table}
+WHERE {primary_log_type.column} IS NOT NULL
+GROUP BY {primary_log_type.column}
+ORDER BY total_logs_of_type DESC;
+"""
+        
+        # 5. Network vs Endpoint Coverage (based on log types)
+        if primary_log_type and primary_hostname:
+            queries['network_vs_endpoint_coverage'] = f"""
+-- Network vs Endpoint Coverage (Derived from log types in {primary_log_type.table}.{primary_log_type.column})
+SELECT 
+    CASE 
+        WHEN LOWER({primary_log_type.column}) LIKE '%firewall%' OR LOWER({primary_log_type.column}) LIKE '%network%' 
+             OR LOWER({primary_log_type.column}) LIKE '%dns%' OR LOWER({primary_log_type.column}) LIKE '%proxy%' THEN 'Network Logs'
+        WHEN LOWER({primary_log_type.column}) LIKE '%endpoint%' OR LOWER({primary_log_type.column}) LIKE '%windows%' 
+             OR LOWER({primary_log_type.column}) LIKE '%linux%' OR LOWER({primary_log_type.column}) LIKE '%edr%' THEN 'Endpoint Logs'
+        ELSE 'Other Logs'
+    END as coverage_category,
+    COUNT(DISTINCT {primary_hostname.column}) as unique_assets,
+    COUNT(*) as total_logs,
+    ROUND(COUNT(DISTINCT {primary_hostname.column}) * 100.0 / 
+          (SELECT COUNT(DISTINCT {primary_hostname.column}) FROM {primary_log_type.table} WHERE {primary_hostname.column} IS NOT NULL), 2) as asset_coverage_percentage
+FROM {primary_log_type.table}
+WHERE {primary_log_type.column} IS NOT NULL AND {primary_hostname.column} IS NOT NULL
+GROUP BY coverage_category
+ORDER BY unique_assets DESC;
+"""
+        
+        # 6. Agent Status Coverage (if we found status data)
+        if primary_status and primary_hostname:
+            queries['agent_status_coverage'] = f"""
+-- Agent Status Coverage (Based on {primary_status.table}.{primary_status.column})
+SELECT 
+    {primary_status.column} as agent_status,
+    COUNT(DISTINCT {primary_hostname.column}) as assets_in_status,
+    ROUND(COUNT(DISTINCT {primary_hostname.column}) * 100.0 / 
+          (SELECT COUNT(DISTINCT {primary_hostname.column}) FROM {primary_status.table} WHERE {primary_hostname.column} IS NOT NULL), 2) as status_percentage
+FROM {primary_status.table}
+WHERE {primary_status.column} IS NOT NULL AND {primary_hostname.column} IS NOT NULL
+GROUP BY {primary_status.column}
+ORDER BY assets_in_status DESC;
+"""
+        
+        # 7. IP Address Coverage (if we found IP data)
+        if primary_ip and primary_hostname:
+            queries['ip_coverage_analysis'] = f"""
+-- IP Address Coverage (Based on {primary_ip.table}.{primary_ip.column})
+SELECT 
+    CASE 
+        WHEN {primary_ip.column} LIKE '10.%' OR {primary_ip.column} LIKE '192.168.%' 
+             OR {primary_ip.column} LIKE '172.%' THEN 'Private IP'
+        WHEN {primary_ip.column} NOT LIKE '10.%' AND {primary_ip.column} NOT LIKE '192.168.%' 
+             AND {primary_ip.column} NOT LIKE '172.%' AND {primary_ip.column} LIKE '%.%.%.%' THEN 'Public IP'
+        ELSE 'Other/IPv6'
+    END as ip_type,
+    COUNT(DISTINCT {primary_ip.column}) as unique_ips,
+    COUNT(DISTINCT {primary_hostname.column}) as assets_with_ips,
+    ROUND(COUNT(DISTINCT {primary_hostname.column}) * 100.0 / 
+          (SELECT COUNT(DISTINCT {primary_hostname.column}) FROM {primary_ip.table} WHERE {primary_hostname.column} IS NOT NULL), 2) as coverage_percentage
+FROM {primary_ip.table}
+WHERE {primary_ip.column} IS NOT NULL AND {primary_hostname.column} IS NOT NULL
+GROUP BY ip_type
+ORDER BY unique_ips DESC;
+"""
+        
+        # 8. Data Quality Assessment
+        if primary_hostname:
+            queries['data_quality_assessment'] = f"""
+-- Data Quality Assessment (Based on primary fields discovered)
+SELECT 
+    'Data Quality Metrics' as assessment_type,
+    COUNT(*) as total_records,
+    COUNT(DISTINCT {primary_hostname.column}) as unique_assets,
+    ROUND(COUNT(DISTINCT {primary_hostname.column}) * 100.0 / COUNT(*), 2) as asset_uniqueness_ratio,
+    COUNT(CASE WHEN {primary_hostname.column} IS NULL THEN 1 END) as null_hostname_count,
+    ROUND(COUNT(CASE WHEN {primary_hostname.column} IS NULL THEN 1 END) * 100.0 / COUNT(*), 2) as null_percentage
+    {f', COUNT(CASE WHEN {primary_log_type.column} IS NULL THEN 1 END) as null_log_type_count' if primary_log_type else ''}
+    {f', COUNT(CASE WHEN {primary_region.column} IS NULL THEN 1 END) as null_region_count' if primary_region else ''}
+FROM {primary_hostname.table};
+"""
+        
+        # 9. Coverage Summary Across All Fields
+        all_tables = list(set(mapping.table for mapping in self.schema_intel.field_mappings.values()))
+        if all_tables:
+            main_table = all_tables[0]  # Use the first table as primary
+            queries['ao1_coverage_summary'] = f"""
+-- AO1 Coverage Summary (Comprehensive view from {main_table})
+SELECT 
+    'AO1 Coverage Summary' as report_type,
+    COUNT(*) as total_records_analyzed,
+    {f"COUNT(DISTINCT {primary_hostname.column}) as unique_assets_identified," if primary_hostname else "NULL as unique_assets_identified,"}
+    {f"COUNT(DISTINCT {primary_log_type.column}) as unique_log_types," if primary_log_type else "NULL as unique_log_types,"}
+    {f"COUNT(DISTINCT {primary_region.column}) as unique_regions," if primary_region else "NULL as unique_regions,"}
+    {f"COUNT(DISTINCT {primary_ip.column}) as unique_ip_addresses," if primary_ip else "NULL as unique_ip_addresses,"}
+    {f"COUNT(DISTINCT {primary_status.column}) as unique_status_values," if primary_status else "NULL as unique_status_values,"}
+    CURRENT_TIMESTAMP as analysis_timestamp
+FROM {main_table};
+"""
+        
+        logger.info(f"✅ Generated {len(queries)} intelligent AO1 queries based on actual schema")
+        
+        return queries
+    
+    def validate_and_execute_queries(self, queries: Dict[str, str]) -> Dict[str, Any]:
+        """Validate and execute the generated queries"""
+        logger.info("🔍 VALIDATING AND EXECUTING QUERIES")
+        
+        results = {}
         
         with self.db_connection():
-            
-            # Complete AO1 query requirements from Confluence
-            ao1_queries = {
-                'global_asset_coverage': 'Global view - x% of all assets globally',
-                'infrastructure_type_coverage': 'Infrastructure type breakdown (On-Prem/Cloud/SaaS/API)',
-                'regional_coverage_analysis': 'Regional and country coverage breakdown',
-                'business_unit_coverage': 'Business unit and CIO coverage analysis',
-                'system_classification_coverage': 'System classification (Web/Windows/Linux/DB/Network)',
-                'security_control_coverage': 'Security control coverage (EDR/Tanium/DLP)',
-                'network_role_coverage': 'Network logging role coverage (Firewall/IDS/Proxy/DNS/WAF)',
-                'endpoint_role_coverage': 'Endpoint logging coverage (OS/EDR/DLP/FIM)',
-                'cloud_role_coverage': 'Cloud logging coverage (Cloud Events/Load Balancer)',
-                'application_coverage': 'Application logging coverage (Web Logs/API Gateway)',
-                'identity_auth_coverage': 'Identity and authentication coverage',
-                'url_fqdn_coverage': 'URL/FQDN coverage analysis',
-                'cmdb_asset_visibility': 'CMDB asset correlation and visibility',
-                'network_zones_coverage': 'Network zones and spans coverage',
-                'ipam_coverage': 'iPAM public IP coverage',
-                'geolocation_coverage': 'Geolocation and VPC coverage',
-                'log_ingest_volume': 'Log ingest volume and quality metrics',
-                'crowdstrike_agent_coverage': 'CrowdStrike agent deployment and health',
-                'domain_visibility': 'Domain visibility by hostname analysis',
-                'cloud_region_coverage': 'Cloud region specific coverage',
-                'data_center_coverage': 'Data center coverage analysis',
-                'apm_coverage': 'APM and application monitoring coverage',
-                'vulnerability_coverage': 'Vulnerability scanning coverage',
-                'discovery_coverage': 'Asset discovery and scanning coverage',
-                'compliance_coverage': 'Logging compliance GSO and Splunk'
-            }
-            
-            for req_name, description in ao1_queries.items():
-                logger.info(f"🎯 Building: {req_name}")
+            for query_name, sql in queries.items():
+                logger.info(f"   🔄 Testing: {query_name}")
                 
-                synthesis = self._build_ao1_requirement_query(req_name, description)
-                if synthesis:
-                    validated = self._validate_and_heal_query(synthesis)
-                    if validated:
-                        self.query_syntheses[req_name] = validated
-                        logger.info(f"   ✅ SUCCESS!")
-                    else:
-                        logger.info(f"   ⚠️ Still working on: {req_name}")
-    
-    def _build_ao1_requirement_query(self, req_name: str, description: str):
-        """Build specific AO1 requirement query based on Confluence specs"""
-        
-        if req_name == 'global_asset_coverage':
-            return self._build_global_coverage_query()
-        elif req_name == 'infrastructure_type_coverage':
-            return self._build_infrastructure_type_query()
-        elif req_name == 'regional_coverage_analysis':
-            return self._build_regional_coverage_query()
-        elif req_name == 'business_unit_coverage':
-            return self._build_business_unit_query()
-        elif req_name == 'system_classification_coverage':
-            return self._build_system_classification_query()
-        elif req_name == 'security_control_coverage':
-            return self._build_security_control_query()
-        elif req_name == 'network_role_coverage':
-            return self._build_network_role_query()
-        elif req_name == 'endpoint_role_coverage':
-            return self._build_endpoint_role_query()
-        elif req_name == 'cloud_role_coverage':
-            return self._build_cloud_role_query()
-        elif req_name == 'application_coverage':
-            return self._build_application_coverage_query()
-        elif req_name == 'identity_auth_coverage':
-            return self._build_identity_auth_query()
-        elif req_name == 'url_fqdn_coverage':
-            return self._build_url_fqdn_query()
-        elif req_name == 'cmdb_asset_visibility':
-            return self._build_cmdb_visibility_query()
-        elif req_name == 'network_zones_coverage':
-            return self._build_network_zones_query()
-        elif req_name == 'ipam_coverage':
-            return self._build_ipam_coverage_query()
-        elif req_name == 'geolocation_coverage':
-            return self._build_geolocation_query()
-        elif req_name == 'log_ingest_volume':
-            return self._build_log_volume_query()
-        elif req_name == 'crowdstrike_agent_coverage':
-            return self._build_crowdstrike_query()
-        elif req_name == 'domain_visibility':
-            return self._build_domain_visibility_query()
-        elif req_name == 'cloud_region_coverage':
-            return self._build_cloud_region_query()
-        elif req_name == 'data_center_coverage':
-            return self._build_data_center_query()
-        elif req_name == 'apm_coverage':
-            return self._build_apm_coverage_query()
-        elif req_name == 'vulnerability_coverage':
-            return self._build_vulnerability_query()
-        elif req_name == 'discovery_coverage':
-            return self._build_discovery_query()
-        elif req_name == 'compliance_coverage':
-            return self._build_compliance_query()
-        else:
-            return self._build_generic_ao1_query(req_name, description)
-    
-    def _build_global_coverage_query(self):
-        return QuerySynthesis(
-            name='global_asset_coverage',
-            purpose='Global view - x% of all assets globally per Confluence requirements',
-            sql='''
-            select 
-                'Global Asset Coverage' as metric_name,
-                count(distinct splunk_host) as total_assets_splunk,
-                count(distinct chronicle_host) as total_assets_chronicle,
-                count(distinct crowdstrike_device_hostname) as total_assets_crowdstrike,
-                count(distinct case when splunk_host is not null or chronicle_host is not null or crowdstrike_device_hostname is not null then coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname) end) as total_unique_assets,
-                round(count(distinct case when chronicle_host is not null then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as chronicle_coverage_percent,
-                round(count(distinct case when crowdstrike_device_hostname is not null then coalesce(splunk_host, crowdstrike_device_hostname) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as crowdstrike_coverage_percent,
-                round(count(distinct case when splunk_host is not null then splunk_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as splunk_coverage_percent
-            from combined
-            ''',
-            confidence=0.95,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_infrastructure_type_query(self):
-        return QuerySynthesis(
-            name='infrastructure_type_coverage',
-            purpose='Infrastructure type breakdown (On-Prem/Cloud/SaaS/API) per Confluence',
-            sql='''
-            select 
-                case 
-                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%aws%' or lower(coalesce(splunk_host, chronicle_host)) like '%ec2%' then 'Cloud-AWS'
-                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%azure%' then 'Cloud-Azure'
-                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%gcp%' or lower(coalesce(splunk_host, chronicle_host)) like '%google%' then 'Cloud-GCP'
-                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%cloud%' then 'Cloud-Other'
-                    when lower(data_type) like '%api%' or lower(coalesce(splunk_host, chronicle_host)) like '%api%' then 'API'
-                    when lower(data_type) like '%saas%' or lower(coalesce(splunk_host, chronicle_host)) like '%saas%' then 'SaaS'
-                    else 'On-Premise'
-                end as infrastructure_type,
-                count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) as asset_count,
-                count(distinct case when chronicle_host is not null then coalesce(splunk_host, chronicle_host) end) as chronicle_covered,
-                count(distinct case when crowdstrike_device_hostname is not null then coalesce(splunk_host, crowdstrike_device_hostname) end) as edr_covered,
-                round(count(distinct case when chronicle_host is not null then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as chronicle_coverage_percent
-            from combined
-            where coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname) is not null
-            group by infrastructure_type
-            order by asset_count desc
-            ''',
-            confidence=0.90,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_regional_coverage_query(self):
-        return QuerySynthesis(
-            name='regional_coverage_analysis',
-            purpose='Regional and country coverage breakdown per Confluence requirements',
-            sql='''
-            select 
-                coalesce(region, 'Unknown Region') as region,
-                coalesce(country, 'Unknown Country') as country,
-                count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) as total_assets,
-                count(distinct case when chronicle_host is not null then coalesce(splunk_host, chronicle_host) end) as chronicle_assets,
-                count(distinct case when splunk_host is not null then splunk_host end) as splunk_assets,
-                round(count(distinct case when chronicle_host is not null then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as chronicle_coverage_percent,
-                round(count(distinct case when splunk_host is not null then splunk_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as splunk_coverage_percent
-            from combined
-            where coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname) is not null
-            group by region, country
-            order by total_assets desc
-            ''',
-            confidence=0.85,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_system_classification_query(self):
-        return QuerySynthesis(
-            name='system_classification_coverage',
-            purpose='System classification (Web/Windows/Linux/DB/Network) per Confluence',
-            sql='''
-            select 
-                case 
-                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%web%' or lower(coalesce(splunk_host, chronicle_host)) like '%www%' then 'Web Server'
-                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%win%' or lower(coalesce(splunk_host, chronicle_host)) like '%windows%' then 'Windows Server'
-                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%linux%' or lower(coalesce(splunk_host, chronicle_host)) like '%unix%' then 'Linux Server'
-                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%db%' or lower(coalesce(splunk_host, chronicle_host)) like '%database%' or lower(coalesce(splunk_host, chronicle_host)) like '%sql%' then 'Database'
-                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%fw%' or lower(coalesce(splunk_host, chronicle_host)) like '%firewall%' or lower(coalesce(splunk_host, chronicle_host)) like '%router%' or lower(coalesce(splunk_host, chronicle_host)) like '%switch%' then 'Network Appliance'
-                    when lower(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) like '%server%' then 'Server-Other'
-                    else 'Unknown System'
-                end as system_classification,
-                count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) as asset_count,
-                count(distinct case when chronicle_host is not null then coalesce(splunk_host, chronicle_host) end) as chronicle_covered,
-                count(distinct case when crowdstrike_device_hostname is not null then coalesce(splunk_host, crowdstrike_device_hostname) end) as edr_covered,
-                round(count(distinct case when chronicle_host is not null then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as coverage_percent
-            from combined
-            where coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname) is not null
-            group by system_classification
-            order by asset_count desc
-            ''',
-            confidence=0.88,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_security_control_query(self):
-        return QuerySynthesis(
-            name='security_control_coverage',
-            purpose='Security control coverage (EDR/Tanium/DLP) per Confluence',
-            sql='''
-            select 
-                'Security Controls Analysis' as analysis_type,
-                count(distinct case when crowdstrike_device_hostname is not null then coalesce(splunk_host, crowdstrike_device_hostname) end) as edr_covered_assets,
-                count(distinct case when lower(coalesce(data_type, '')) like '%tanium%' then coalesce(splunk_host, chronicle_host) end) as tanium_covered_assets,
-                count(distinct case when lower(coalesce(data_type, '')) like '%dlp%' then coalesce(splunk_host, chronicle_host) end) as dlp_covered_assets,
-                count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) as total_assets,
-                round(count(distinct case when crowdstrike_device_hostname is not null then coalesce(splunk_host, crowdstrike_device_hostname) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as edr_coverage_percent,
-                round(count(distinct case when lower(coalesce(data_type, '')) like '%tanium%' then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as tanium_coverage_percent,
-                round(count(distinct case when lower(coalesce(data_type, '')) like '%dlp%' then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as dlp_coverage_percent
-            from combined
-            where coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname) is not null
-            ''',
-            confidence=0.85,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_network_role_query(self):
-        return QuerySynthesis(
-            name='network_role_coverage',
-            purpose='Network logging role coverage (Firewall/IDS/Proxy/DNS/WAF) per Confluence',
-            sql='''
-            select 
-                case 
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%firewall%' then 'Firewall Traffic'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%ids%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%ips%' then 'IDS/IPS'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%ndr%' then 'NDR'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%proxy%' then 'Proxy'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%dns%' then 'DNS'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%waf%' then 'WAF'
-                    else 'Other Network'
-                end as network_role,
-                count(distinct coalesce(splunk_host, chronicle_host)) as unique_assets,
-                count(*) as total_logs,
-                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_assets,
-                count(distinct case when splunk_host is not null then splunk_host end) as splunk_assets,
-                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as chronicle_coverage_percent
-            from combined
-            where coalesce(data_type, chronicle_log_type) is not null
-            and (lower(coalesce(data_type, chronicle_log_type, '')) like '%firewall%' 
-                 or lower(coalesce(data_type, chronicle_log_type, '')) like '%ids%'
-                 or lower(coalesce(data_type, chronicle_log_type, '')) like '%ips%'
-                 or lower(coalesce(data_type, chronicle_log_type, '')) like '%ndr%'
-                 or lower(coalesce(data_type, chronicle_log_type, '')) like '%proxy%'
-                 or lower(coalesce(data_type, chronicle_log_type, '')) like '%dns%'
-                 or lower(coalesce(data_type, chronicle_log_type, '')) like '%waf%')
-            group by network_role
-            order by unique_assets desc
-            ''',
-            confidence=0.92,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_endpoint_role_query(self):
-        return QuerySynthesis(
-            name='endpoint_role_coverage',
-            purpose='Endpoint logging coverage (OS/EDR/DLP/FIM) per Confluence',
-            sql='''
-            select 
-                case 
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%os%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%winevt%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%syslog%' then 'OS logs (WinEVT, Linux syslog)'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%edr%' or crowdstrike_device_hostname is not null then 'EDR'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%dlp%' then 'DLP'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%fim%' then 'FIM'
-                    else 'Other Endpoint'
-                end as endpoint_role,
-                count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) as unique_assets,
-                count(*) as total_logs,
-                count(distinct case when crowdstrike_device_hostname is not null then crowdstrike_device_hostname end) as edr_assets,
-                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_assets,
-                round(count(distinct case when crowdstrike_device_hostname is not null then crowdstrike_device_hostname end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as edr_coverage_percent
-            from combined
-            where (lower(coalesce(data_type, chronicle_log_type, '')) like '%os%' 
-                   or lower(coalesce(data_type, chronicle_log_type, '')) like '%winevt%'
-                   or lower(coalesce(data_type, chronicle_log_type, '')) like '%syslog%'
-                   or lower(coalesce(data_type, chronicle_log_type, '')) like '%edr%'
-                   or lower(coalesce(data_type, chronicle_log_type, '')) like '%dlp%'
-                   or lower(coalesce(data_type, chronicle_log_type, '')) like '%fim%'
-                   or crowdstrike_device_hostname is not null)
-            group by endpoint_role
-            order by unique_assets desc
-            ''',
-            confidence=0.90,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_cloud_role_query(self):
-        return QuerySynthesis(
-            name='cloud_role_coverage',
-            purpose='Cloud logging coverage (Cloud Events/Load Balancer) per Confluence',
-            sql='''
-            select 
-                case 
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%cloud%event%' then 'Cloud Event'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%load%balancer%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%lb%' then 'Cloud Load Balancer'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%cloud%config%' then 'Cloud Config'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%theom%' then 'Theom'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%wiz%' then 'Wiz'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%cloud%security%' then 'Cloud Security'
-                    else 'Other Cloud'
-                end as cloud_role,
-                count(distinct coalesce(splunk_host, chronicle_host)) as unique_assets,
-                count(*) as total_logs,
-                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_coverage,
-                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as coverage_percent
-            from combined
-            where lower(coalesce(data_type, chronicle_log_type, '')) like '%cloud%'
-               or lower(coalesce(data_type, chronicle_log_type, '')) like '%load%balancer%'
-               or lower(coalesce(data_type, chronicle_log_type, '')) like '%theom%'
-               or lower(coalesce(data_type, chronicle_log_type, '')) like '%wiz%'
-            group by cloud_role
-            order by unique_assets desc
-            ''',
-            confidence=0.85,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_application_coverage_query(self):
-        return QuerySynthesis(
-            name='application_coverage',
-            purpose='Application logging coverage (Web Logs/API Gateway) per Confluence',
-            sql='''
-            select 
-                case 
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%web%log%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%http%access%' then 'Web Logs (HTTP Access)'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%api%gateway%' then 'API Gateway'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%application%' then 'Application Logs'
-                    else 'Other Application'
-                end as application_role,
-                count(distinct coalesce(splunk_host, chronicle_host)) as unique_assets,
-                count(*) as total_logs,
-                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_coverage,
-                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as coverage_percent
-            from combined
-            where lower(coalesce(data_type, chronicle_log_type, '')) like '%web%log%'
-               or lower(coalesce(data_type, chronicle_log_type, '')) like '%http%access%'
-               or lower(coalesce(data_type, chronicle_log_type, '')) like '%api%gateway%'
-               or lower(coalesce(data_type, chronicle_log_type, '')) like '%application%'
-            group by application_role
-            order by unique_assets desc
-            ''',
-            confidence=0.80,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_identity_auth_query(self):
-        return QuerySynthesis(
-            name='identity_auth_coverage',
-            purpose='Identity and Authentication coverage (Auth attempts/Privilege escalation) per Confluence',
-            sql='''
-            select 
-                case 
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%auth%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%authentication%' then 'Authentication attempts'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%privilege%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%escalation%' then 'Privilege escalation'
-                    when lower(coalesce(data_type, chronicle_log_type, '')) like '%identity%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%create%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%modify%' or lower(coalesce(data_type, chronicle_log_type, '')) like '%destroy%' then 'Identity create/modify/destroy'
-                    else 'Other Identity'
-                end as identity_role,
-                count(distinct coalesce(splunk_host, chronicle_host)) as unique_assets,
-                count(*) as total_logs,
-                'Domain' as domain_coverage,
-                'Internal' as internal_coverage,
-                'External' as external_coverage,
-                'Controls' as controls_coverage
-            from combined
-            where lower(coalesce(data_type, chronicle_log_type, '')) like '%auth%'
-               or lower(coalesce(data_type, chronicle_log_type, '')) like '%privilege%'
-               or lower(coalesce(data_type, chronicle_log_type, '')) like '%identity%'
-            group by identity_role
-            order by unique_assets desc
-            ''',
-            confidence=0.80,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_url_fqdn_query(self):
-        return QuerySynthesis(
-            name='url_fqdn_coverage',
-            purpose='URL/FQDN coverage analysis per Confluence visibility factors',
-            sql='''
-            select 
-                'URL/FQDN Coverage Analysis' as metric_name,
-                count(distinct case when url is not null or fqdn is not null then coalesce(splunk_host, chronicle_host) end) as assets_with_url_fqdn,
-                count(distinct case when url is not null then coalesce(splunk_host, chronicle_host) end) as assets_with_url,
-                count(distinct case when fqdn is not null then coalesce(splunk_host, chronicle_host) end) as assets_with_fqdn,
-                count(distinct coalesce(splunk_host, chronicle_host)) as total_assets,
-                round(count(distinct case when url is not null or fqdn is not null then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as url_fqdn_coverage_percent
-            from combined
-            where coalesce(splunk_host, chronicle_host) is not null
-            ''',
-            confidence=0.75,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_cmdb_visibility_query(self):
-        return QuerySynthesis(
-            name='cmdb_asset_visibility',
-            purpose='CMDB Asset Visibility correlation per Confluence requirements',
-            sql='''
-            select 
-                'CMDB Asset Visibility' as metric_name,
-                count(distinct case when name is not null then name end) as cmdb_assets,
-                count(distinct coalesce(splunk_host, chronicle_host)) as logging_assets,
-                count(distinct case when name is not null and (splunk_host is not null or chronicle_host is not null) then coalesce(name, splunk_host, chronicle_host) end) as correlated_assets,
-                count(distinct case when name is not null and splunk_host is null and chronicle_host is null then name end) as cmdb_only_assets,
-                count(distinct case when name is null and (splunk_host is not null or chronicle_host is not null) then coalesce(splunk_host, chronicle_host) end) as logging_only_assets,
-                round(count(distinct case when name is not null and (splunk_host is not null or chronicle_host is not null) then coalesce(name, splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(name, splunk_host, chronicle_host)), 2) as correlation_percentage
-            from combined
-            where coalesce(name, splunk_host, chronicle_host) is not null
-            ''',
-            confidence=0.85,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_network_zones_query(self):
-        return QuerySynthesis(
-            name='network_zones_coverage',
-            purpose='Network Zones/spans coverage per Confluence visibility factors',
-            sql='''
-            select 
-                coalesce(network_zone, zone, region, 'Unknown Zone') as network_zone,
-                count(distinct coalesce(splunk_host, chronicle_host)) as assets_in_zone,
-                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_covered,
-                count(distinct case when splunk_host is not null then splunk_host end) as splunk_covered,
-                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as zone_coverage_percent
-            from combined
-            where coalesce(splunk_host, chronicle_host) is not null
-            group by network_zone
-            order by assets_in_zone desc
-            ''',
-            confidence=0.70,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_ipam_coverage_query(self):
-        return QuerySynthesis(
-            name='ipam_coverage',
-            purpose='iPAM Public IP Coverage per Confluence visibility factors',
-            sql='''
-            select 
-                'iPAM Public IP Coverage' as metric_name,
-                count(distinct case when ip_address is not null and not (ip_address like '10.%' or ip_address like '192.168.%' or ip_address like '172.%') then ip_address end) as public_ips,
-                count(distinct case when ip_address is not null and (ip_address like '10.%' or ip_address like '192.168.%' or ip_address like '172.%') then ip_address end) as private_ips,
-                count(distinct ip_address) as total_ips,
-                count(distinct coalesce(splunk_host, chronicle_host)) as total_assets,
-                round(count(distinct case when ip_address is not null and not (ip_address like '10.%' or ip_address like '192.168.%' or ip_address like '172.%') then ip_address end) * 100.0 / count(distinct ip_address), 2) as public_ip_percent
-            from combined
-            where ip_address is not null
-            ''',
-            confidence=0.75,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_geolocation_query(self):
-        return QuerySynthesis(
-            name='geolocation_coverage',
-            purpose='Geolocation and VPC coverage per Confluence visibility factors',
-            sql='''
-            select 
-                coalesce(country, region, 'Unknown Location') as location,
-                coalesce(vpc, 'No VPC') as vpc_info,
-                count(distinct coalesce(splunk_host, chronicle_host)) as assets,
-                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_covered,
-                count(distinct ip_address) as unique_ips,
-                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as coverage_percent
-            from combined
-            where coalesce(splunk_host, chronicle_host) is not null
-            group by location, vpc_info
-            order by assets desc
-            ''',
-            confidence=0.75,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_log_volume_query(self):
-        return QuerySynthesis(
-            name='log_ingest_volume',
-            purpose='%log ingest volume and quality metrics per Confluence visibility factors',
-            sql='''
-            select 
-                coalesce(data_type, 'Unknown Type') as log_type,
-                count(*) as total_log_volume,
-                count(distinct coalesce(splunk_host, chronicle_host)) as unique_assets,
-                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_sources,
-                count(distinct case when splunk_host is not null then splunk_host end) as splunk_sources,
-                round(count(*) * 100.0 / (select count(*) from combined), 2) as percent_of_total_volume,
-                round(avg(case when timestamp is not null then 1.0 else 0.0 end) * 100, 2) as timestamp_completeness_percent
-            from combined
-            group by data_type
-            order by total_log_volume desc
-            ''',
-            confidence=0.90,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_crowdstrike_query(self):
-        return QuerySynthesis(
-            name='crowdstrike_agent_coverage',
-            purpose='CrowdStrike Agent Coverage per Confluence visibility factors',
-            sql='''
-            select 
-                coalesce(crowdstrike_agent_health, 'No Agent') as agent_status,
-                count(distinct crowdstrike_device_hostname) as agents_in_status,
-                count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) as total_potential_assets,
-                round(count(distinct crowdstrike_device_hostname) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as agent_deployment_percent,
-                'CrowdStrike Agent Coverage Analysis' as metric_type
-            from combined
-            group by agent_status
-            order by agents_in_status desc
-            ''',
-            confidence=0.95,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_domain_visibility_query(self):
-        return QuerySynthesis(
-            name='domain_visibility',
-            purpose='Domain Visibility - Asset visibility by hostname and domain per Confluence',
-            sql='''
-            select 
-                case 
-                    when coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname) like '%.%' then 
-                        substr(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname), 
-                               instr(coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname), '.') + 1)
-                    else 'No Domain'
-                end as domain,
-                count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) as assets_in_domain,
-                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_covered,
-                count(distinct case when splunk_host is not null then splunk_host end) as splunk_covered,
-                round(count(distinct case when chronicle_host is not null or splunk_host is not null then coalesce(chronicle_host, splunk_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)), 2) as domain_visibility_percent
-            from combined
-            where coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname) is not null
-            group by domain
-            order by assets_in_domain desc
-            ''',
-            confidence=0.85,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_cloud_region_query(self):
-        return QuerySynthesis(
-            name='cloud_region_coverage',
-            purpose='Cloud region specific coverage per Confluence requirements',
-            sql='''
-            select 
-                coalesce(cloud_region, region, 'Unknown Region') as cloud_region,
-                count(distinct coalesce(splunk_host, chronicle_host)) as cloud_assets,
-                count(distinct case when lower(coalesce(splunk_host, chronicle_host)) like '%aws%' then coalesce(splunk_host, chronicle_host) end) as aws_assets,
-                count(distinct case when lower(coalesce(splunk_host, chronicle_host)) like '%azure%' then coalesce(splunk_host, chronicle_host) end) as azure_assets,
-                count(distinct case when lower(coalesce(splunk_host, chronicle_host)) like '%gcp%' then coalesce(splunk_host, chronicle_host) end) as gcp_assets,
-                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as region_coverage_percent
-            from combined
-            where lower(coalesce(splunk_host, chronicle_host, data_type, '')) like '%cloud%'
-               or lower(coalesce(splunk_host, chronicle_host, '')) like '%aws%'
-               or lower(coalesce(splunk_host, chronicle_host, '')) like '%azure%'
-               or lower(coalesce(splunk_host, chronicle_host, '')) like '%gcp%'
-            group by cloud_region
-            order by cloud_assets desc
-            ''',
-            confidence=0.80,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_data_center_query(self):
-        return QuerySynthesis(
-            name='data_center_coverage',
-            purpose='Data center coverage analysis per Confluence requirements',
-            sql='''
-            select 
-                coalesce(data_center, datacenter, location, 'Unknown DC') as data_center,
-                count(distinct coalesce(splunk_host, chronicle_host)) as dc_assets,
-                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_covered,
-                count(distinct case when splunk_host is not null then splunk_host end) as splunk_covered,
-                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as dc_coverage_percent
-            from combined
-            where coalesce(splunk_host, chronicle_host) is not null
-            group by data_center
-            order by dc_assets desc
-            ''',
-            confidence=0.70,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_apm_coverage_query(self):
-        return QuerySynthesis(
-            name='apm_coverage',
-            purpose='APM and application monitoring coverage - UAID available in AppMap per Confluence',
-            sql='''
-            select 
-                'APM Coverage Analysis' as metric_name,
-                count(distinct case when uaid is not null then uaid end) as uaid_available,
-                count(distinct case when app_number is not null then app_number end) as app_numbers,
-                count(distinct case when application_class is not null then application_class end) as app_classes,
-                count(distinct coalesce(splunk_host, chronicle_host)) as total_assets,
-                round(count(distinct case when uaid is not null then uaid end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as uaid_coverage_percent,
-                'Available for CMDB but need other way to determine application class' as note
-            from combined
-            where coalesce(splunk_host, chronicle_host, uaid, app_number) is not null
-            ''',
-            confidence=0.85,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_vulnerability_query(self):
-        return QuerySynthesis(
-            name='vulnerability_coverage',
-            purpose='Vulnerability scanning coverage - CMDB integrates vulnerability scanning per Confluence',
-            sql='''
-            select 
-                'Vulnerability Coverage' as metric_name,
-                count(distinct case when vulnerability_scan_date is not null then coalesce(splunk_host, chronicle_host) end) as vuln_scanned_assets,
-                count(distinct case when last_scan_date is not null then coalesce(splunk_host, chronicle_host) end) as recently_scanned,
-                count(distinct coalesce(splunk_host, chronicle_host)) as total_assets,
-                round(count(distinct case when vulnerability_scan_date is not null then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as vuln_scan_coverage_percent,
-                'CMDB integrates Vulnerability Scanning to identify assets' as source
-            from combined
-            where coalesce(splunk_host, chronicle_host) is not null
-            ''',
-            confidence=0.75,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_discovery_query(self):
-        return QuerySynthesis(
-            name='discovery_coverage',
-            purpose='Asset discovery and scanning coverage - CMDB incorporates discovery scanning per Confluence',
-            sql='''
-            select 
-                'Asset Discovery Coverage' as metric_name,
-                count(distinct case when discovery_method is not null then coalesce(splunk_host, chronicle_host) end) as discovered_assets,
-                count(distinct case when dhcp_record is not null then coalesce(splunk_host, chronicle_host) end) as dhcp_mapped_assets,
-                count(distinct case when cloud_hosting_control is not null then coalesce(splunk_host, chronicle_host) end) as cloud_mapped_assets,
-                count(distinct coalesce(splunk_host, chronicle_host)) as total_assets,
-                round(count(distinct case when discovery_method is not null then coalesce(splunk_host, chronicle_host) end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as discovery_coverage_percent,
-                'CMDB incorporates discovery scanning to populate assets' as source,
-                'CMDB incorporates DHCP records to map assets to IP assignment' as dhcp_note,
-                'CMDB incorporates Cloud Hosting controls to map assets in the cloud' as cloud_note
-            from combined
-            where coalesce(splunk_host, chronicle_host) is not null
-            ''',
-            confidence=0.80,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_compliance_query(self):
-        return QuerySynthesis(
-            name='compliance_coverage',
-            purpose='Logging Compliance in GSO and Splunk - visibility statements per Confluence',
-            sql='''
-            select 
-                'Logging Compliance Analysis' as metric_name,
-                count(distinct case when splunk_host is not null then splunk_host end) as splunk_compliant_assets,
-                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_compliant_assets,
-                count(distinct coalesce(splunk_host, chronicle_host)) as total_assets,
-                round(count(distinct case when splunk_host is not null then splunk_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as splunk_compliance_percent,
-                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as chronicle_compliance_percent,
-                'Visibility statements based on logging platform' as compliance_basis,
-                'This will be a more complicated statistic' as complexity_note
-            from combined
-            where coalesce(splunk_host, chronicle_host) is not null
-            ''',
-            confidence=0.85,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_business_unit_query(self):
-        return QuerySynthesis(
-            name='business_unit_coverage',
-            purpose='Business Unit and CIO coverage analysis per Confluence (noted as not available)',
-            sql='''
-            select 
-                'Business Unit Analysis' as metric_name,
-                coalesce(business_unit, bu, department, 'Unknown BU') as business_unit,
-                coalesce(cio_organization, cio, 'Unknown CIO') as cio_org,
-                count(distinct coalesce(splunk_host, chronicle_host)) as assets_in_bu,
-                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_covered,
-                round(count(distinct case when chronicle_host is not null then chronicle_host end) * 100.0 / count(distinct coalesce(splunk_host, chronicle_host)), 2) as bu_coverage_percent,
-                'Note: Business Unit not available per Confluence' as availability_note
-            from combined
-            where coalesce(splunk_host, chronicle_host) is not null
-            group by business_unit, cio_org
-            order by assets_in_bu desc
-            ''',
-            confidence=0.60,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _build_generic_ao1_query(self, req_name: str, description: str):
-        """Generic fallback query builder for any AO1 requirement"""
-        return QuerySynthesis(
-            name=req_name,
-            purpose=description,
-            sql=f'''
-            select 
-                '{req_name}' as metric_name,
-                '{description}' as metric_description,
-                count(distinct coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname)) as total_assets,
-                count(distinct case when chronicle_host is not null then chronicle_host end) as chronicle_assets,
-                count(distinct case when splunk_host is not null then splunk_host end) as splunk_assets,
-                count(distinct case when crowdstrike_device_hostname is not null then crowdstrike_device_hostname end) as crowdstrike_assets,
-                count(*) as total_records
-            from combined
-            where coalesce(splunk_host, chronicle_host, crowdstrike_device_hostname) is not null
-            ''',
-            confidence=0.70,
-            validation_checks=[],
-            expected_ranges={},
-            fallback_strategies=[]
-        )
-    
-    def _validate_and_heal_query(self, synthesis: QuerySynthesis):
-        logger.info(f"🔄 RELENTLESS TESTING: {synthesis.name}")
-        
-        attempt = 0
-        max_attempts = 10000  # Try up to 10,000 variations
-        
-        while attempt < max_attempts:
-            attempt += 1
-            
-            if attempt == 1:
-                current_sql = synthesis.sql
-            else:
-                current_sql = self._generate_alternative_query(synthesis, attempt)
-            
-            try:
-                with self.db_connection():
-                    result = self.connection.execute(current_sql).fetchall()
+                try:
+                    result = self.connection.execute(sql).fetchall()
+                    column_names = [desc[0] for desc in self.connection.description]
                     
-                    if result and len(result) > 0:
-                        synthesis.sql = current_sql
-                        logger.info(f"   ✅ SUCCESS after {attempt} attempts! {len(result)} rows")
-                        self._add_working_query_to_app(synthesis, len(result))
-                        return synthesis
-                        
-            except Exception as e:
-                if attempt % 100 == 0:
-                    logger.info(f"   🔄 Attempt {attempt}/10000: {str(e)[:50]}...")
-                continue
+                    results[query_name] = {
+                        'status': 'SUCCESS',
+                        'row_count': len(result),
+                        'columns': column_names,
+                        'data': result[:10],  # First 10 rows
+                        'sql': sql
+                    }
+                    
+                    logger.info(f"   ✅ {query_name}: {len(result)} rows")
+                    
+                except Exception as e:
+                    results[query_name] = {
+                        'status': 'FAILED',
+                        'error': str(e),
+                        'sql': sql
+                    }
+                    
+                    logger.warning(f"   ❌ {query_name}: {str(e)}")
         
-        logger.error(f"   ❌ FAILED after {max_attempts} attempts: {synthesis.name}")
-        return None
+        success_count = sum(1 for r in results.values() if r['status'] == 'SUCCESS')
+        logger.info(f"🎯 VALIDATION COMPLETE: {success_count}/{len(queries)} queries successful")
+        
+        return results
     
-    def _generate_alternative_query(self, synthesis: QuerySynthesis, attempt: int):
-        """Generate thousands of different query alternatives"""
+    def generate_comprehensive_report(self) -> Dict[str, Any]:
+        """Generate a comprehensive AO1 readiness report"""
         
-        # Get all possible field combinations from our intelligence
-        host_fields = []
-        table_options = []
+        if not self.schema_intel:
+            raise ValueError("Must run schema discovery first")
         
-        for field_ref, intel in self.field_intelligence.items():
-            table, column = field_ref.split('.', 1)
-            table_options.append(table)
-            if intel.primary_type == 'host_identity' or intel.confidence > 0.3:
-                host_fields.append((table, column, intel.confidence))
+        # Generate queries based on discovered schema
+        queries = self.generate_intelligent_ao1_queries()
         
-        # Remove duplicates and sort by confidence
-        host_fields = list(set(host_fields))
-        host_fields.sort(key=lambda x: x[2], reverse=True)
-        table_options = list(set(table_options))
+        # Validate and execute queries
+        query_results = self.validate_and_execute_queries(queries)
         
-        # Cycle through different strategies based on attempt number
-        strategy = attempt % 20
-        
-        if strategy == 0:
-            return self._try_basic_count_query(host_fields, table_options, attempt)
-        elif strategy == 1:
-            return self._try_simple_select_query(host_fields, table_options, attempt)
-        elif strategy == 2:
-            return self._try_coverage_analysis(host_fields, table_options, attempt)
-        elif strategy == 3:
-            return self._try_group_by_query(host_fields, table_options, attempt)
-        elif strategy == 4:
-            return self._try_case_when_query(host_fields, table_options, attempt)
-        elif strategy == 5:
-            return self._try_join_query(host_fields, table_options, attempt)
-        elif strategy == 6:
-            return self._try_subquery_approach(host_fields, table_options, attempt)
-        elif strategy == 7:
-            return self._try_cte_approach(host_fields, table_options, attempt)
-        elif strategy == 8:
-            return self._try_union_approach(host_fields, table_options, attempt)
-        elif strategy == 9:
-            return self._try_aggregation_variations(host_fields, table_options, attempt)
-        elif strategy == 10:
-            return self._try_filter_variations(host_fields, table_options, attempt)
-        elif strategy == 11:
-            return self._try_column_alias_variations(host_fields, table_options, attempt)
-        elif strategy == 12:
-            return self._try_function_variations(host_fields, table_options, attempt)
-        elif strategy == 13:
-            return self._try_cast_variations(host_fields, table_options, attempt)
-        elif strategy == 14:
-            return self._try_null_handling_variations(host_fields, table_options, attempt)
-        elif strategy == 15:
-            return self._try_string_function_variations(host_fields, table_options, attempt)
-        elif strategy == 16:
-            return self._try_math_variations(host_fields, table_options, attempt)
-        elif strategy == 17:
-            return self._try_limit_variations(host_fields, table_options, attempt)
-        elif strategy == 18:
-            return self._try_order_variations(host_fields, table_options, attempt)
-        else:
-            return self._try_random_combination(host_fields, table_options, attempt)
-    
-    def _try_basic_count_query(self, host_fields, table_options, attempt):
-        field_idx = (attempt // 20) % len(host_fields) if host_fields else 0
-        table_idx = (attempt // 100) % len(table_options) if table_options else 0
-        
-        if host_fields and table_options:
-            table, column, conf = host_fields[field_idx]
-            target_table = table_options[table_idx]
-            
-            return f'''
-            select 
-                count(*) as total_records,
-                count(distinct {column}) as unique_values,
-                'basic_count_test' as query_type
-            from {target_table}
-            '''
-        
-        return "select 1 as test_query"
-    
-    def _try_simple_select_query(self, host_fields, table_options, attempt):
-        if host_fields and table_options:
-            field_idx = (attempt // 20) % len(host_fields)
-            table_idx = (attempt // 100) % len(table_options)
-            
-            table, column, conf = host_fields[field_idx]
-            target_table = table_options[table_idx]
-            
-            return f'''
-            select 
-                {column} as asset_identifier,
-                count(*) as record_count
-            from {target_table}
-            where {column} is not null
-            group by {column}
-            limit 100
-            '''
-        
-        return "select 'test' as result"
-    
-    def _try_coverage_analysis(self, host_fields, table_options, attempt):
-        if not host_fields or not table_options:
-            return "select 'no fields' as result"
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table_idx = (attempt // 100) % len(table_options)
-        
-        table, column, conf = host_fields[field_idx]
-        target_table = table_options[table_idx]
-        
-        # Try different coverage column combinations
-        coverage_columns = [
-            'chronicle_device_hostname',
-            'crowdstrike_device_hostname', 
-            'splunk_host',
-            'chronicle_ips',
-            'chronicle_host',
-            'device_hostname',
-            'hostname',
-            'host'
-        ]
-        
-        cov_idx = attempt % len(coverage_columns)
-        coverage_col = coverage_columns[cov_idx]
-        
-        return f'''
-        select 
-            count(distinct {column}) as total_assets,
-            count(distinct case when {coverage_col} is not null then {column} end) as covered_assets,
-            round(count(distinct case when {coverage_col} is not null then {column} end) * 100.0 / count(distinct {column}), 2) as coverage_percent
-        from {target_table}
-        where {column} is not null
-        '''
-    
-    def _try_group_by_query(self, host_fields, table_options, attempt):
-        if not host_fields or not table_options:
-            return "select 'no data' as result"
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table_idx = (attempt // 100) % len(table_options)
-        
-        table, column, conf = host_fields[field_idx]
-        target_table = table_options[table_idx]
-        
-        # Try different grouping columns
-        group_columns = ['data_type', 'source', 'type', 'category', 'status', 'region', 'environment']
-        group_idx = attempt % len(group_columns)
-        group_col = group_columns[group_idx]
-        
-        return f'''
-        select 
-            coalesce({group_col}, 'Unknown') as category,
-            count(distinct {column}) as asset_count,
-            count(*) as total_records
-        from {target_table}
-        where {column} is not null
-        group by {group_col}
-        order by asset_count desc
-        limit 50
-        '''
-    
-    def _try_case_when_query(self, host_fields, table_options, attempt):
-        if not host_fields or not table_options:
-            return "select 'no data' as result"
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table_idx = (attempt // 100) % len(table_options)
-        
-        table, column, conf = host_fields[field_idx]
-        target_table = table_options[table_idx]
-        
-        return f'''
-        select 
-            case 
-                when lower({column}) like '%server%' then 'Server'
-                when lower({column}) like '%desktop%' then 'Desktop'
-                when lower({column}) like '%laptop%' then 'Laptop'
-                when lower({column}) like '%vm%' then 'Virtual'
-                else 'Other'
-            end as asset_type,
-            count(distinct {column}) as count
-        from {target_table}
-        where {column} is not null
-        group by asset_type
-        order by count desc
-        '''
-    
-    def _try_join_query(self, host_fields, table_options, attempt):
-        if len(table_options) < 2 or not host_fields:
-            return "select 'insufficient data' as result"
-        
-        table1 = table_options[0]
-        table2 = table_options[1]
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table, column, conf = host_fields[field_idx]
-        
-        return f'''
-        select 
-            t1.{column} as asset_id,
-            count(t1.{column}) as table1_count,
-            count(t2.{column}) as table2_count
-        from {table1} t1
-        left join {table2} t2 on t1.{column} = t2.{column}
-        where t1.{column} is not null
-        group by t1.{column}
-        limit 100
-        '''
-    
-    def _try_subquery_approach(self, host_fields, table_options, attempt):
-        if not host_fields or not table_options:
-            return "select 'no data' as result"
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table_idx = (attempt // 100) % len(table_options)
-        
-        table, column, conf = host_fields[field_idx]
-        target_table = table_options[table_idx]
-        
-        return f'''
-        select 
-            'Asset Analysis' as report_type,
-            (select count(distinct {column}) from {target_table} where {column} is not null) as total_assets,
-            (select count(*) from {target_table}) as total_records
-        '''
-    
-    def _try_cte_approach(self, host_fields, table_options, attempt):
-        if not host_fields or not table_options:
-            return "select 'no data' as result"
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table_idx = (attempt // 100) % len(table_options)
-        
-        table, column, conf = host_fields[field_idx]
-        target_table = table_options[table_idx]
-        
-        return f'''
-        with asset_summary as (
-            select 
-                {column} as asset_id,
-                count(*) as record_count
-            from {target_table}
-            where {column} is not null
-            group by {column}
-        )
-        select 
-            count(*) as unique_assets,
-            avg(record_count) as avg_records_per_asset,
-            max(record_count) as max_records
-        from asset_summary
-        '''
-    
-    def _try_union_approach(self, host_fields, table_options, attempt):
-        if len(table_options) < 2 or not host_fields:
-            return "select 'insufficient data' as result"
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table, column, conf = host_fields[field_idx]
-        
-        table1 = table_options[0]
-        table2 = table_options[1]
-        
-        return f'''
-        select 'Table1' as source, count(distinct {column}) as asset_count from {table1} where {column} is not null
-        union all
-        select 'Table2' as source, count(distinct {column}) as asset_count from {table2} where {column} is not null
-        '''
-    
-    def _try_aggregation_variations(self, host_fields, table_options, attempt):
-        if not host_fields or not table_options:
-            return "select 'no data' as result"
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table_idx = (attempt // 100) % len(table_options)
-        
-        table, column, conf = host_fields[field_idx]
-        target_table = table_options[table_idx]
-        
-        agg_functions = ['count', 'sum', 'avg', 'min', 'max']
-        agg_idx = attempt % len(agg_functions)
-        agg_func = agg_functions[agg_idx]
-        
-        return f'''
-        select 
-            {agg_func}(case when {column} is not null then 1 else 0 end) as metric_value,
-            '{agg_func}' as aggregation_type,
-            '{column}' as column_analyzed
-        from {target_table}
-        '''
-    
-    def _try_filter_variations(self, host_fields, table_options, attempt):
-        if not host_fields or not table_options:
-            return "select 'no data' as result"
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table_idx = (attempt // 100) % len(table_options)
-        
-        table, column, conf = host_fields[field_idx]
-        target_table = table_options[table_idx]
-        
-        filters = [
-            f"{column} is not null",
-            f"{column} != ''",
-            f"length({column}) > 0",
-            f"trim({column}) != ''",
-            f"{column} not like '%test%'"
-        ]
-        
-        filter_idx = attempt % len(filters)
-        filter_clause = filters[filter_idx]
-        
-        return f'''
-        select 
-            count(*) as filtered_count,
-            '{filter_clause}' as filter_applied
-        from {target_table}
-        where {filter_clause}
-        '''
-    
-    def _try_column_alias_variations(self, host_fields, table_options, attempt):
-        if not host_fields or not table_options:
-            return "select 'no data' as result"
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table_idx = (attempt // 100) % len(table_options)
-        
-        table, column, conf = host_fields[field_idx]
-        target_table = table_options[table_idx]
-        
-        return f'''
-        select 
-            {column} as "Asset_ID",
-            count(*) as "Record_Count",
-            'Column_Alias_Test' as "Query_Name"
-        from {target_table}
-        where {column} is not null
-        group by {column}
-        limit 10
-        '''
-    
-    def _try_function_variations(self, host_fields, table_options, attempt):
-        if not host_fields or not table_options:
-            return "select 'no data' as result"
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table_idx = (attempt // 100) % len(table_options)
-        
-        table, column, conf = host_fields[field_idx]
-        target_table = table_options[table_idx]
-        
-        functions = ['upper', 'lower', 'trim', 'length', 'substr']
-        func_idx = attempt % len(functions)
-        func_name = functions[func_idx]
-        
-        if func_name == 'substr':
-            return f'''
-            select 
-                substr({column}, 1, 10) as truncated_value,
-                count(*) as count
-            from {target_table}
-            where {column} is not null
-            group by substr({column}, 1, 10)
-            limit 20
-            '''
-        else:
-            return f'''
-            select 
-                {func_name}({column}) as transformed_value,
-                count(*) as count
-            from {target_table}
-            where {column} is not null
-            group by {func_name}({column})
-            limit 20
-            '''
-    
-    def _try_cast_variations(self, host_fields, table_options, attempt):
-        if not host_fields or not table_options:
-            return "select 'no data' as result"
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table_idx = (attempt // 100) % len(table_options)
-        
-        table, column, conf = host_fields[field_idx]
-        target_table = table_options[table_idx]
-        
-        return f'''
-        select 
-            cast(count(distinct {column}) as varchar) as asset_count_text,
-            cast(count(*) as float) as total_records_float
-        from {target_table}
-        where {column} is not null
-        '''
-    
-    def _try_null_handling_variations(self, host_fields, table_options, attempt):
-        if not host_fields or not table_options:
-            return "select 'no data' as result"
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table_idx = (attempt // 100) % len(table_options)
-        
-        table, column, conf = host_fields[field_idx]
-        target_table = table_options[table_idx]
-        
-        return f'''
-        select 
-            coalesce({column}, 'MISSING') as asset_value,
-            case when {column} is null then 'NULL' else 'NOT_NULL' end as null_status,
-            count(*) as count
-        from {target_table}
-        group by coalesce({column}, 'MISSING'), case when {column} is null then 'NULL' else 'NOT_NULL' end
-        limit 50
-        '''
-    
-    def _try_string_function_variations(self, host_fields, table_options, attempt):
-        if not host_fields or not table_options:
-            return "select 'no data' as result"
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table_idx = (attempt // 100) % len(table_options)
-        
-        table, column, conf = host_fields[field_idx]
-        target_table = table_options[table_idx]
-        
-        return f'''
-        select 
-            left({column}, 5) as prefix,
-            right({column}, 5) as suffix,
-            count(*) as count
-        from {target_table}
-        where {column} is not null and length({column}) >= 10
-        group by left({column}, 5), right({column}, 5)
-        limit 30
-        '''
-    
-    def _try_math_variations(self, host_fields, table_options, attempt):
-        if not host_fields or not table_options:
-            return "select 'no data' as result"
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table_idx = (attempt // 100) % len(table_options)
-        
-        table, column, conf = host_fields[field_idx]
-        target_table = table_options[table_idx]
-        
-        return f'''
-        select 
-            round(count(distinct {column}) * 1.0, 2) as unique_count_float,
-            round(count(*) * 100.0 / (count(*) + 1), 2) as percentage_calc
-        from {target_table}
-        where {column} is not null
-        '''
-    
-    def _try_limit_variations(self, host_fields, table_options, attempt):
-        if not host_fields or not table_options:
-            return "select 'no data' as result"
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table_idx = (attempt // 100) % len(table_options)
-        
-        table, column, conf = host_fields[field_idx]
-        target_table = table_options[table_idx]
-        
-        limits = [1, 5, 10, 25, 50, 100]
-        limit_idx = attempt % len(limits)
-        limit_val = limits[limit_idx]
-        
-        return f'''
-        select 
-            {column} as sample_value,
-            'Limited to {limit_val}' as note
-        from {target_table}
-        where {column} is not null
-        limit {limit_val}
-        '''
-    
-    def _try_order_variations(self, host_fields, table_options, attempt):
-        if not host_fields or not table_options:
-            return "select 'no data' as result"
-        
-        field_idx = (attempt // 20) % len(host_fields)
-        table_idx = (attempt // 100) % len(table_options)
-        
-        table, column, conf = host_fields[field_idx]
-        target_table = table_options[table_idx]
-        
-        orders = ['asc', 'desc']
-        order_idx = attempt % len(orders)
-        order_dir = orders[order_idx]
-        
-        return f'''
-        select 
-            {column} as ordered_value,
-            row_number() over (order by {column} {order_dir}) as row_num
-        from {target_table}
-        where {column} is not null
-        order by {column} {order_dir}
-        limit 20
-        '''
-    
-    def _try_random_combination(self, host_fields, table_options, attempt):
-        """Last resort: try completely random combinations"""
-        if not host_fields or not table_options:
-            return f"select {attempt} as random_attempt, 'no data available' as status"
-        
-        import random
-        random.seed(attempt)  # Deterministic randomness
-        
-        field_idx = random.randint(0, len(host_fields) - 1)
-        table_idx = random.randint(0, len(table_options) - 1)
-        
-        table, column, conf = host_fields[field_idx]
-        target_table = table_options[table_idx]
-        
-        random_operations = [
-            f"select distinct {column} from {target_table} limit 5",
-            f"select count(*) as total from {target_table}",
-            f"select {column}, count(*) as cnt from {target_table} group by {column} limit 10",
-            f"select * from {target_table} where {column} is not null limit 3",
-            f"select max({column}) as max_val from {target_table}",
-            f"select min({column}) as min_val from {target_table}"
-        ]
-        
-        op_idx = random.randint(0, len(random_operations) - 1)
-        return random_operations[op_idx]
-    
-    def _add_working_query_to_app(self, synthesis: QuerySynthesis, row_count: int):
-        """Add working query as commented code to app.py"""
-        try:
-            # Try multiple possible locations for app.py
-            possible_paths = [
-                Path("app.py"),
-                Path("./app.py"), 
-                Path("../app.py"),
-                Path("../../app.py")
-            ]
-            
-            app_py_path = None
-            for path in possible_paths:
-                if path.exists():
-                    app_py_path = path
-                    break
-            
-            if not app_py_path:
-                # Create app.py if it doesn't exist
-                app_py_path = Path("app.py")
-                with open(app_py_path, 'w') as f:
-                    f.write("# Auto-generated app.py for AO1 queries\n")
-                logger.info(f"   📄 Created new app.py file")
-            
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            # Create the route name - convert snake_case to camelCase for Flask route
-            route_name = synthesis.name.replace('_', '').title().replace(' ', '')
-            function_name = synthesis.name.lower()
-            
-            comment_block = f'''
-
-# ============================================================================
-# AUTO-GENERATED WORKING QUERY - {timestamp}
-# Query Name: {synthesis.name}
-# Purpose: {synthesis.purpose}
-# Result: {row_count} rows returned successfully
-# Confidence: {synthesis.confidence:.3f}
-# ============================================================================
-
-# @app.route("/get{route_name}")
-# def get_{function_name}():
-#     query = """
-{self._format_sql_for_comment(synthesis.sql)}
-#     """
-#     data = runLocalDBQuery(query, None)
-#     return {{"data": data, "query_name": "{synthesis.name}", "row_count": {row_count}}}
-
-'''
-            
-            with open(app_py_path, 'a', encoding='utf-8') as f:
-                f.write(comment_block)
-            
-            logger.info(f"   📝 Added {synthesis.name} to app.py as commented Flask route")
-            
-        except Exception as e:
-            logger.debug(f"Could not add to app.py: {e}")
-    
-    def _format_sql_for_comment(self, sql: str) -> str:
-        """Format SQL for commenting in Python file"""
-        lines = sql.strip().split('\n')
-        formatted_lines = []
-        
-        for line in lines:
-            if line.strip():
-                formatted_lines.append(f"#         {line}")
-            else:
-                formatted_lines.append("#")
-        
-        return '\n'.join(formatted_lines)
-    
-    def generate_final_brilliant_report(self):
-        logger.info("📊 GENERATING FINAL BRILLIANT REPORT")
-        
-        total_requirements = 25
-        successful_queries = len(self.query_syntheses)
-        success_rate = (successful_queries / total_requirements) * 100 if total_requirements > 0 else 0
-        
+        # Create comprehensive report
         report = {
-            'timestamp': datetime.now().isoformat(),
-            'brilliant_analysis_summary': {
-                'total_ao1_requirements': total_requirements,
-                'successfully_synthesized': successful_queries,
-                'success_rate_percentage': round(success_rate, 2),
-                'total_healing_iterations': self.healing_iterations,
-                'intelligence_discovered': len(self.field_intelligence),
-                'database_path': str(self.db_path)
+            'analysis_timestamp': datetime.now().isoformat(),
+            'database_path': str(self.db_path),
+            'schema_intelligence': {
+                'tables_discovered': self.schema_intel.tables,
+                'total_fields_analyzed': len(self.schema_intel.field_mappings),
+                'hostname_fields_found': len(self.schema_intel.hostname_fields),
+                'ip_fields_found': len(self.schema_intel.ip_fields),
+                'log_type_fields_found': len(self.schema_intel.log_type_fields),
+                'region_fields_found': len(self.schema_intel.region_fields),
+                'status_fields_found': len(self.schema_intel.status_fields),
+                'timestamp_fields_found': len(self.schema_intel.timestamp_fields)
             },
-            'field_intelligence_discovered': {
-                field_ref: {
-                    'primary_type': intel.primary_type,
-                    'confidence': round(intel.confidence, 3),
-                    'reasoning': intel.reasoning,
-                    'sample_data': intel.samples,
-                    'synthesis_options': intel.synthesis_options
+            'field_mappings': {
+                f"{mapping.table}.{mapping.column}": {
+                    'field_type': mapping.field_type,
+                    'confidence': round(mapping.confidence, 3),
+                    'unique_values': mapping.unique_count,
+                    'total_records': mapping.total_count,
+                    'sample_values': mapping.sample_values,
+                    'patterns': mapping.patterns
                 }
-                for field_ref, intel in self.field_intelligence.items()
-                if intel.confidence > 0.3
+                for mapping in sorted(
+                    self.schema_intel.field_mappings.values(), 
+                    key=lambda x: x.confidence, 
+                    reverse=True
+                )[:20]  # Top 20 by confidence
             },
-            'brilliant_query_syntheses': {
-                name: {
-                    'purpose': synthesis.purpose,
-                    'sql_query': synthesis.sql,
-                    'confidence_score': round(synthesis.confidence, 3),
-                    'validation_checks': synthesis.validation_checks,
-                    'expected_ranges': synthesis.expected_ranges
-                }
-                for name, synthesis in self.query_syntheses.items()
-            },
+            'ao1_query_results': query_results,
             'ao1_readiness_assessment': {
-                'overall_readiness': round(success_rate, 1),
-                'critical_capabilities': self._assess_critical_capabilities(),
-                'data_quality_score': self._calculate_data_quality_score(),
-                'synthesis_intelligence': self._assess_synthesis_intelligence()
+                'queries_generated': len(queries),
+                'queries_successful': sum(1 for r in query_results.values() if r['status'] == 'SUCCESS'),
+                'success_rate_percentage': round(
+                    sum(1 for r in query_results.values() if r['status'] == 'SUCCESS') / len(queries) * 100, 1
+                ) if queries else 0,
+                'critical_capabilities': {
+                    'asset_identification': len(self.schema_intel.hostname_fields) > 0,
+                    'log_type_classification': len(self.schema_intel.log_type_fields) > 0,
+                    'geographic_coverage': len(self.schema_intel.region_fields) > 0,
+                    'ip_address_tracking': len(self.schema_intel.ip_fields) > 0,
+                    'status_monitoring': len(self.schema_intel.status_fields) > 0
+                },
+                'data_quality_indicators': {
+                    'avg_field_confidence': round(
+                        np.mean([m.confidence for m in self.schema_intel.field_mappings.values()]), 3
+                    ) if self.schema_intel.field_mappings else 0,
+                    'high_confidence_fields': sum(
+                        1 for m in self.schema_intel.field_mappings.values() if m.confidence > 0.7
+                    )
+                }
             }
         }
         
         return report
     
-    def _assess_critical_capabilities(self):
-        capabilities = {
-            'asset_identification': bool(self._find_best_field('host_identity')[0]),
-            'network_visibility': bool(self._find_best_field('network_logs')[0]),
-            'endpoint_monitoring': bool(self._find_best_field('endpoint_logs')[0]),
-            'agent_health_tracking': bool(self._find_best_field('agent_status')[0]),
-            'infrastructure_classification': bool(self._find_best_field('infrastructure_type')[0])
-        }
-        
-        return {
-            'capabilities_available': capabilities,
-            'capability_score': sum(capabilities.values()) / len(capabilities) * 100
-        }
-    
-    def _find_best_field(self, pattern_type, min_confidence=0.3):
-        candidates = []
-        for field_ref, intel in self.field_intelligence.items():
-            if intel.primary_type == pattern_type and intel.confidence >= min_confidence:
-                candidates.append((field_ref, intel))
-        
-        if candidates:
-            return max(candidates, key=lambda x: x[1].confidence)
-        return None, None
-    
-    def _calculate_data_quality_score(self):
-        if not self.field_intelligence:
-            return 0
-        
-        quality_scores = [intel.statistical_profile.get('uniqueness_ratio', 0) 
-                         for intel in self.field_intelligence.values()]
-        
-        return round(np.mean(quality_scores) * 100, 2) if quality_scores else 0
-    
-    def _assess_synthesis_intelligence(self):
-        synthesis_scores = [synthesis.confidence for synthesis in self.query_syntheses.values()]
-        
-        return {
-            'average_synthesis_confidence': round(np.mean(synthesis_scores), 3) if synthesis_scores else 0,
-            'synthesis_count': len(synthesis_scores),
-            'high_confidence_syntheses': sum(1 for score in synthesis_scores if score > 0.7)
-        }
-    
-    def run_brilliant_ao1_analysis(self):
-        logger.info("🧠 BRILLIANT AO1 ANALYSIS ENGINE STARTING")
-        logger.info("⚡ Will discover, synthesize, and validate until perfect")
+    def run_complete_analysis(self) -> Dict[str, Any]:
+        """Run the complete intelligent AO1 analysis"""
+        logger.info("🚀 STARTING INTELLIGENT AO1 ANALYSIS")
         
         try:
-            self.discover_all_content_intelligence()
+            # Step 1: Discover actual schema
+            self.discover_actual_schema()
             
-            self.synthesize_brilliant_queries()
+            # Step 2: Generate comprehensive report
+            report = self.generate_comprehensive_report()
             
-            report = self.generate_final_brilliant_report()
-            
-            output_file = Path("ao1_brilliant_analysis.json")
+            # Step 3: Save report
+            output_file = Path("intelligent_ao1_analysis.json")
             with open(output_file, 'w') as f:
                 json.dump(report, f, indent=2, default=str)
             
-            logger.info(f"🎉 BRILLIANT ANALYSIS COMPLETE!")
-            logger.info(f"📊 Success Rate: {report['brilliant_analysis_summary']['success_rate_percentage']}%")
-            logger.info(f"🧠 Intelligence Fields: {report['brilliant_analysis_summary']['intelligence_discovered']}")
-            logger.info(f"⚡ Synthesized Queries: {report['brilliant_analysis_summary']['successfully_synthesized']}")
-            logger.info(f"💾 Report: {output_file}")
+            logger.info("🎉 INTELLIGENT ANALYSIS COMPLETE!")
+            logger.info(f"📊 Success Rate: {report['ao1_readiness_assessment']['success_rate_percentage']}%")
+            logger.info(f"🧠 Fields Analyzed: {report['schema_intelligence']['total_fields_analyzed']}")
+            logger.info(f"⚡ Queries Generated: {report['ao1_readiness_assessment']['queries_generated']}")
+            logger.info(f"💾 Report saved: {output_file}")
             
             return report
             
         except Exception as e:
-            logger.error(f"Brilliant analysis failed: {e}")
+            logger.error(f"Analysis failed: {e}")
             logger.error(traceback.format_exc())
             return {'error': str(e), 'traceback': traceback.format_exc()}
 
 def main():
     import argparse
     
-    parser = argparse.ArgumentParser(description='AO1 Brilliant AI Query Engine')
-    parser.add_argument('--database', '-d', default='data.duckdb')
-    parser.add_argument('--healing-cycles', '-c', type=int, default=100)
+    parser = argparse.ArgumentParser(description='Intelligent AO1 Query Generator')
+    parser.add_argument('--database', '-d', required=True, help='Path to DuckDB database')
     parser.add_argument('--verbose', '-v', action='store_true')
     
     args = parser.parse_args()
@@ -1881,21 +914,26 @@ def main():
         print(f"❌ Database not found: {db_path}")
         return 1
     
-    print(f"🧠 BRILLIANT AO1 AI ENGINE")
+    print(f"🧠 INTELLIGENT AO1 ANALYSIS ENGINE")
     print(f"🗄️  Database: {db_path}")
-    print(f"⚡ Max healing cycles: {args.healing_cycles}")
     
     try:
-        engine = BrilliantQueryEngine(str(db_path))
-        engine.max_healing_cycles = args.healing_cycles
-        
-        results = engine.run_brilliant_ao1_analysis()
+        engine = IntelligentAO1Engine(str(db_path))
+        results = engine.run_complete_analysis()
         
         if 'error' not in results:
-            print(f"\n🎉 BRILLIANT SUCCESS!")
-            print(f"📊 {results['brilliant_analysis_summary']['success_rate_percentage']}% success rate")
-            print(f"🧠 {results['brilliant_analysis_summary']['intelligence_discovered']} intelligent field discoveries")
-            print(f"⚡ {results['brilliant_analysis_summary']['successfully_synthesized']} perfect query syntheses")
+            print(f"\n🎉 ANALYSIS SUCCESSFUL!")
+            assessment = results['ao1_readiness_assessment']
+            print(f"📊 {assessment['success_rate_percentage']}% query success rate")
+            print(f"🔍 {assessment['queries_generated']} AO1 queries generated")
+            print(f"✅ {assessment['queries_successful']} queries executed successfully")
+            
+            capabilities = assessment['critical_capabilities']
+            print(f"\n🎯 CRITICAL CAPABILITIES:")
+            for capability, available in capabilities.items():
+                status = "✅" if available else "❌"
+                print(f"   {status} {capability.replace('_', ' ').title()}")
+            
             return 0
         else:
             print(f"\n❌ {results['error']}")
