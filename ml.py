@@ -1,43 +1,28 @@
 #!/usr/bin/env python3
 import logging
-import pandas as pd
-import numpy as np
-from collections import Counter, defaultdict
-import re
 import json
 import time
-import threading
-from datetime import datetime, timedelta
-from typing import Dict, List, Tuple, Optional, Any, Union
-from dataclasses import dataclass, field
-import argparse
-import sys
-import os
-from pathlib import Path
+import re
 import sqlite3
 import duckdb
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.cluster import KMeans
-from sklearn.decomposition import PCA
-from sklearn.ensemble import IsolationForest
-from sklearn.preprocessing import StandardScaler
-import networkx as nx
-import concurrent.futures
+import sys
+import os
+import argparse
+from datetime import datetime
+from typing import Dict, List, Tuple, Optional, Any
+from dataclasses import dataclass, field
+from collections import Counter, defaultdict
 from functools import lru_cache
+import concurrent.futures
+import threading
 import warnings
-import multiprocessing as mp
-from scipy import sparse
-from scipy.stats import entropy
-import hashlib
-import pickle
-from itertools import combinations
 warnings.filterwarnings('ignore')
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[logging.FileHandler('ultraintelligent_ao1.log'), logging.StreamHandler(sys.stdout)])
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[logging.FileHandler('pure_intelligent_ao1.log'), logging.StreamHandler(sys.stdout)])
 logger = logging.getLogger(__name__)
 
 @dataclass
-class UltraFieldIntelligence:
+class PureFieldIntelligence:
     name: str
     table: str
     data_type: str
@@ -50,20 +35,15 @@ class UltraFieldIntelligence:
     security_relevance: float = 0.0
     relationships: List[str] = field(default_factory=list)
     quality_score: float = 0.0
-    entropy_score: float = 0.0
-    cardinality_ratio: float = 0.0
-    null_ratio: float = 0.0
-    pattern_consistency: float = 0.0
-    statistical_profile: Dict = field(default_factory=dict)
-    network_centrality: float = 0.0
-    cluster_membership: int = -1
-    anomaly_score: float = 0.0
     intelligence_score: float = 0.0
-    evolution_history: List = field(default_factory=list)
     consciousness_level: float = 0.0
+    pattern_strength: float = 0.0
+    uniqueness_ratio: float = 0.0
+    completeness_ratio: float = 0.0
+    evolution_count: int = 0
     
 @dataclass
-class UltraIntelligentQuery:
+class PureIntelligentQuery:
     name: str
     description: str
     sql: str
@@ -75,274 +55,264 @@ class UltraIntelligentQuery:
     business_alignment: float = 0.0
     perfection_score: float = 0.0
     validation_status: str = "untested"
-    field_intelligence: List[UltraFieldIntelligence] = field(default_factory=list)
-    execution_plan: Dict = field(default_factory=dict)
-    performance_metrics: Dict = field(default_factory=dict)
-    optimization_suggestions: List = field(default_factory=list)
+    field_intelligence: List[PureFieldIntelligence] = field(default_factory=list)
     intelligence_level: float = 0.0
     consciousness_alignment: float = 0.0
+    optimization_suggestions: List[str] = field(default_factory=list)
 
-class UltraSemanticIntelligence:
+class PureSemanticEngine:
     def __init__(self):
-        self.semantic_patterns = {
+        self.pattern_library = {
             'hostname': {
-                'regex': [r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$', r'.*\.(com|net|org|edu|gov|mil|int|local|internal)$', r'^(web|db|mail|ftp|dns|dhcp|proxy|firewall|switch|router|server|host)', r'\b(srv|web|db|mail|proxy|fw|gw|switch|rtr)\d*\b'],
-                'keywords': ['server', 'computer', 'machine', 'device', 'endpoint', 'host', 'node', 'system'],
-                'context': ['infrastructure', 'network', 'asset', 'production', 'development', 'staging'],
-                'security_weight': 0.8,
-                'business_weight': 0.7
+                'patterns': [
+                    r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$',
+                    r'.*\.(com|net|org|edu|gov|mil|int|local|internal)$',
+                    r'^(web|db|mail|ftp|dns|dhcp|proxy|firewall|switch|router|server|host)',
+                    r'\b(srv|web|db|mail|proxy|fw|gw|switch|rtr)\d*\b'
+                ],
+                'keywords': ['server', 'computer', 'machine', 'device', 'endpoint', 'host', 'node'],
+                'context': ['infrastructure', 'network', 'asset', 'production', 'development'],
+                'weight': 0.95
             },
             'ip_address': {
-                'regex': [r'^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$', r'^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$', r'^::1$|^127\.0\.0\.1$', r'^10\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|^192\.168\.'],
-                'keywords': ['address', 'location', 'network', 'routing', 'interface', 'subnet'],
-                'context': ['network', 'routing', 'connectivity', 'protocol', 'firewall'],
-                'security_weight': 0.9,
-                'business_weight': 0.6
+                'patterns': [
+                    r'^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$',
+                    r'^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$',
+                    r'^::1$|^127\.0\.0\.1$',
+                    r'^10\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|^192\.168\.'
+                ],
+                'keywords': ['address', 'ip', 'network', 'routing', 'interface'],
+                'context': ['network', 'routing', 'connectivity', 'firewall'],
+                'weight': 0.95
             },
             'security_event': {
-                'regex': [r'\b(alert|critical|warning|error|failure|breach|attack|intrusion|malware|virus|threat)\b', r'\b(block|deny|drop|reject|quarantine|isolate)\b', r'\b(authentication|authorization|login|logout|failed|success)\b', r'\b(suspicious|anomal|unusual|unexpected)\b'],
-                'keywords': ['security', 'threat', 'incident', 'alert', 'violation', 'breach', 'attack'],
-                'context': ['security', 'protection', 'defense', 'monitoring', 'compliance'],
-                'security_weight': 1.0,
-                'business_weight': 0.9
+                'patterns': [
+                    r'\b(alert|critical|warning|error|failure|breach|attack|intrusion|malware|virus|threat)\b',
+                    r'\b(block|deny|drop|reject|quarantine|isolate)\b',
+                    r'\b(authentication|authorization|login|logout|failed|success)\b',
+                    r'\b(suspicious|anomal|unusual|unexpected)\b'
+                ],
+                'keywords': ['security', 'threat', 'incident', 'alert', 'violation', 'breach'],
+                'context': ['security', 'protection', 'defense', 'monitoring'],
+                'weight': 0.98
             },
             'cloud_resource': {
-                'regex': [r'\b(aws|azure|gcp|google|amazon|microsoft)\b', r'\b(ec2|s3|rds|lambda|cloudwatch|vpc|subnet)\b', r'\b(vm|container|kubernetes|docker|pod)\b', r'\b(region|zone|datacenter|availability)\b'],
-                'keywords': ['cloud', 'virtual', 'container', 'service', 'platform', 'instance'],
-                'context': ['cloud', 'virtual', 'scalable', 'managed', 'elastic'],
-                'security_weight': 0.7,
-                'business_weight': 0.8
+                'patterns': [
+                    r'\b(aws|azure|gcp|google|amazon|microsoft)\b',
+                    r'\b(ec2|s3|rds|lambda|cloudwatch|vpc|subnet)\b',
+                    r'\b(vm|container|kubernetes|docker|pod)\b',
+                    r'\b(region|zone|datacenter|availability)\b'
+                ],
+                'keywords': ['cloud', 'virtual', 'container', 'service', 'platform'],
+                'context': ['cloud', 'virtual', 'scalable', 'managed'],
+                'weight': 0.88
             },
             'network_device': {
-                'regex': [r'\b(firewall|router|switch|proxy|gateway|load.?balancer)\b', r'\b(cisco|juniper|palo.?alto|fortinet|checkpoint)\b', r'\b(interface|port|vlan|bgp|ospf|spanning.?tree)\b', r'\b(wan|lan|dmz|vrf|acl)\b'],
-                'keywords': ['network', 'device', 'equipment', 'infrastructure', 'firewall', 'router'],
-                'context': ['network', 'connectivity', 'routing', 'switching', 'security'],
-                'security_weight': 0.8,
-                'business_weight': 0.7
+                'patterns': [
+                    r'\b(firewall|router|switch|proxy|gateway|load.?balancer)\b',
+                    r'\b(cisco|juniper|palo.?alto|fortinet|checkpoint)\b',
+                    r'\b(interface|port|vlan|bgp|ospf|spanning.?tree)\b',
+                    r'\b(wan|lan|dmz|vrf|acl)\b'
+                ],
+                'keywords': ['network', 'device', 'equipment', 'infrastructure'],
+                'context': ['network', 'connectivity', 'routing', 'switching'],
+                'weight': 0.85
             },
             'endpoint': {
-                'regex': [r'\b(windows|linux|macos|ubuntu|centos|redhat)\b', r'\b(workstation|laptop|desktop|server|endpoint)\b', r'\b(agent|sensor|client|host)\b', r'\b(patch|update|vulnerability|compliance)\b'],
-                'keywords': ['computer', 'workstation', 'device', 'system', 'endpoint', 'client'],
-                'context': ['user', 'employee', 'workspace', 'productivity', 'managed'],
-                'security_weight': 0.8,
-                'business_weight': 0.8
+                'patterns': [
+                    r'\b(windows|linux|macos|ubuntu|centos|redhat)\b',
+                    r'\b(workstation|laptop|desktop|server|endpoint)\b',
+                    r'\b(agent|sensor|client|host)\b',
+                    r'\b(patch|update|vulnerability|compliance)\b'
+                ],
+                'keywords': ['computer', 'workstation', 'device', 'system', 'endpoint'],
+                'context': ['user', 'employee', 'workspace', 'productivity'],
+                'weight': 0.85
             },
             'application': {
-                'regex': [r'\b(web|http|https|api|service|application)\b', r'\b(apache|nginx|iis|tomcat|nodejs)\b', r'\b(database|sql|mysql|postgresql|oracle|mongodb)\b', r'\b(transaction|session|request|response)\b'],
-                'keywords': ['application', 'software', 'service', 'program', 'api', 'web'],
-                'context': ['business', 'function', 'process', 'workflow', 'service'],
-                'security_weight': 0.6,
-                'business_weight': 0.9
+                'patterns': [
+                    r'\b(web|http|https|api|service|application)\b',
+                    r'\b(apache|nginx|iis|tomcat|nodejs)\b',
+                    r'\b(database|sql|mysql|postgresql|oracle|mongodb)\b',
+                    r'\b(transaction|session|request|response)\b'
+                ],
+                'keywords': ['application', 'software', 'service', 'program', 'api'],
+                'context': ['business', 'function', 'process', 'workflow'],
+                'weight': 0.75
             },
             'identity': {
-                'regex': [r'\b(user|username|userid|account|identity)\b', r'\b(domain|ldap|ad|active.?directory|kerberos)\b', r'\b(group|role|permission|privilege|access)\b', r'\b(authentication|authorization|sso|saml|oauth)\b'],
-                'keywords': ['user', 'identity', 'account', 'person', 'employee', 'access'],
-                'context': ['access', 'permission', 'role', 'privilege', 'authentication'],
-                'security_weight': 0.9,
-                'business_weight': 0.7
+                'patterns': [
+                    r'\b(user|username|userid|account|identity)\b',
+                    r'\b(domain|ldap|ad|active.?directory|kerberos)\b',
+                    r'\b(group|role|permission|privilege|access)\b',
+                    r'\b(authentication|authorization|sso|saml|oauth)\b'
+                ],
+                'keywords': ['user', 'identity', 'account', 'person', 'employee'],
+                'context': ['access', 'permission', 'role', 'privilege'],
+                'weight': 0.90
             },
             'log_type': {
-                'regex': [r'\b(syslog|eventlog|audit|access|error|debug)\b', r'\b(info|warn|error|fatal|trace|verbose)\b', r'\b(security|application|system|network)\b', r'\b(json|xml|csv|key.?value|structured)\b'],
-                'keywords': ['log', 'record', 'event', 'message', 'audit', 'monitoring'],
-                'context': ['monitoring', 'tracking', 'auditing', 'debugging', 'compliance'],
-                'security_weight': 0.7,
-                'business_weight': 0.6
+                'patterns': [
+                    r'\b(syslog|eventlog|audit|access|error|debug)\b',
+                    r'\b(info|warn|error|fatal|trace|verbose)\b',
+                    r'\b(security|application|system|network)\b',
+                    r'\b(json|xml|csv|key.?value|structured)\b'
+                ],
+                'keywords': ['log', 'record', 'event', 'message', 'audit'],
+                'context': ['monitoring', 'tracking', 'auditing', 'debugging'],
+                'weight': 0.80
             },
             'geographic': {
-                'regex': [r'\b(country|region|city|state|province|continent)\b', r'\b(datacenter|site|location|facility|campus)\b', r'\b(timezone|utc|gmt|est|pst|cst)\b', r'\b(latitude|longitude|coordinates|gps)\b'],
-                'keywords': ['location', 'place', 'region', 'area', 'geographic', 'site'],
-                'context': ['location', 'geography', 'region', 'area', 'jurisdiction'],
-                'security_weight': 0.4,
-                'business_weight': 0.6
+                'patterns': [
+                    r'\b(country|region|city|state|province|continent)\b',
+                    r'\b(datacenter|site|location|facility|campus)\b',
+                    r'\b(timezone|utc|gmt|est|pst|cst)\b',
+                    r'\b(latitude|longitude|coordinates|gps)\b'
+                ],
+                'keywords': ['location', 'place', 'region', 'area', 'geographic'],
+                'context': ['location', 'geography', 'region', 'area'],
+                'weight': 0.75
             },
             'asset_identifier': {
-                'regex': [r'\b(asset.?id|device.?id|computer.?id|machine.?id)\b', r'\b(serial|uuid|guid|mac.?address)\b', r'\b(inventory|cmdb|asset.?tag)\b', r'\b(manufacturer|model|version|build)\b'],
-                'keywords': ['identifier', 'id', 'tag', 'number', 'serial', 'uuid'],
-                'context': ['inventory', 'tracking', 'management', 'asset', 'identification'],
-                'security_weight': 0.7,
-                'business_weight': 0.8
+                'patterns': [
+                    r'\b(asset.?id|device.?id|computer.?id|machine.?id)\b',
+                    r'\b(serial|uuid|guid|mac.?address)\b',
+                    r'\b(inventory|cmdb|asset.?tag)\b',
+                    r'\b(manufacturer|model|version|build)\b'
+                ],
+                'keywords': ['identifier', 'id', 'tag', 'number', 'serial'],
+                'context': ['inventory', 'tracking', 'management', 'asset'],
+                'weight': 0.95
             },
             'security_control': {
-                'regex': [r'\b(edr|antivirus|dlp|fim|siem|soar)\b', r'\b(crowdstrike|tanium|splunk|qradar|sentinel)\b', r'\b(signature|rule|policy|baseline)\b', r'\b(scan|detect|monitor|alert|response)\b'],
-                'keywords': ['security', 'protection', 'defense', 'control', 'monitoring', 'detection'],
-                'context': ['security', 'protection', 'defense', 'monitoring', 'compliance'],
-                'security_weight': 1.0,
-                'business_weight': 0.8
+                'patterns': [
+                    r'\b(edr|antivirus|dlp|fim|siem|soar)\b',
+                    r'\b(crowdstrike|tanium|splunk|qradar|sentinel)\b',
+                    r'\b(signature|rule|policy|baseline)\b',
+                    r'\b(scan|detect|monitor|alert|response)\b'
+                ],
+                'keywords': ['security', 'protection', 'defense', 'control'],
+                'context': ['security', 'protection', 'defense', 'monitoring'],
+                'weight': 0.98
             },
             'business_unit': {
-                'regex': [r'\b(department|division|unit|org|organization)\b', r'\b(finance|hr|it|security|operations|sales)\b', r'\b(cost.?center|budget|owner|manager)\b', r'\b(business|corporate|enterprise|subsidiary)\b'],
-                'keywords': ['organization', 'department', 'unit', 'division', 'business', 'company'],
-                'context': ['business', 'organization', 'structure', 'hierarchy', 'management'],
-                'security_weight': 0.3,
-                'business_weight': 1.0
+                'patterns': [
+                    r'\b(department|division|unit|org|organization)\b',
+                    r'\b(finance|hr|it|security|operations|sales)\b',
+                    r'\b(cost.?center|budget|owner|manager)\b',
+                    r'\b(business|corporate|enterprise|subsidiary)\b'
+                ],
+                'keywords': ['organization', 'department', 'unit', 'division'],
+                'context': ['business', 'organization', 'structure', 'hierarchy'],
+                'weight': 0.65
             },
             'compliance': {
-                'regex': [r'\b(compliance|audit|regulation|standard|framework)\b', r'\b(sox|pci|hipaa|gdpr|iso|nist|cis)\b', r'\b(policy|procedure|control|requirement)\b', r'\b(risk|assessment|remediation|exception)\b'],
-                'keywords': ['compliance', 'regulation', 'standard', 'requirement', 'audit', 'policy'],
-                'context': ['regulatory', 'compliance', 'standard', 'requirement', 'legal'],
-                'security_weight': 0.8,
-                'business_weight': 0.9
+                'patterns': [
+                    r'\b(compliance|audit|regulation|standard|framework)\b',
+                    r'\b(sox|pci|hipaa|gdpr|iso|nist|cis)\b',
+                    r'\b(policy|procedure|control|requirement)\b',
+                    r'\b(risk|assessment|remediation|exception)\b'
+                ],
+                'keywords': ['compliance', 'regulation', 'standard', 'requirement'],
+                'context': ['regulatory', 'compliance', 'standard', 'requirement'],
+                'weight': 0.85
             },
             'performance': {
-                'regex': [r'\b(cpu|memory|disk|network|bandwidth|latency)\b', r'\b(utilization|performance|metric|threshold)\b', r'\b(response.?time|throughput|capacity|load)\b', r'\b(monitor|measure|baseline|trend)\b'],
-                'keywords': ['performance', 'metric', 'measurement', 'monitoring', 'capacity', 'utilization'],
-                'context': ['performance', 'monitoring', 'measurement', 'optimization', 'capacity'],
-                'security_weight': 0.3,
-                'business_weight': 0.7
+                'patterns': [
+                    r'\b(cpu|memory|disk|network|bandwidth|latency)\b',
+                    r'\b(utilization|performance|metric|threshold)\b',
+                    r'\b(response.?time|throughput|capacity|load)\b',
+                    r'\b(monitor|measure|baseline|trend)\b'
+                ],
+                'keywords': ['performance', 'metric', 'measurement', 'monitoring'],
+                'context': ['performance', 'monitoring', 'measurement', 'optimization'],
+                'weight': 0.55
             },
             'time_field': {
-                'regex': [r'\b(timestamp|datetime|date|time|created|modified|updated)\b', r'\b(start|end|duration|interval|period)\b', r'\b(year|month|day|hour|minute|second)\b', r'\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{10}|\d{13}'],
-                'keywords': ['time', 'date', 'timestamp', 'temporal', 'chronological', 'when'],
-                'context': ['temporal', 'chronological', 'sequential', 'historical', 'tracking'],
-                'security_weight': 0.5,
-                'business_weight': 0.5
+                'patterns': [
+                    r'\b(timestamp|datetime|date|time|created|modified|updated)\b',
+                    r'\b(start|end|duration|interval|period)\b',
+                    r'\b(year|month|day|hour|minute|second)\b',
+                    r'\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{10}|\d{13}'
+                ],
+                'keywords': ['time', 'date', 'timestamp', 'temporal'],
+                'context': ['temporal', 'chronological', 'sequential', 'historical'],
+                'weight': 0.75
             }
         }
         
-        self.tfidf_vectorizer = TfidfVectorizer(max_features=1000, stop_words='english', ngram_range=(1, 3))
-        self.intelligence_matrix = None
-        
-    def analyze_field_ultra(self, field_name: str, sample_values: List[Any], table_context: str = "") -> Dict[str, Any]:
+    def analyze_field_pure(self, field_name: str, sample_values: List[Any], table_context: str = "") -> Dict[str, Any]:
         field_text = f"{field_name} {table_context}".lower()
-        sample_text = ' '.join([str(val) for val in sample_values if val is not None]).lower()
+        sample_text = ' '.join([str(val) for val in sample_values if val is not None])[:2000].lower()
         combined_text = f"{field_text} {sample_text}"
         
         semantic_scores = defaultdict(float)
         
-        for semantic_type, patterns in self.semantic_patterns.items():
+        for semantic_type, type_data in self.pattern_library.items():
             score = 0.0
             
-            for regex_pattern in patterns['regex']:
-                field_matches = len(re.findall(regex_pattern, field_text, re.IGNORECASE))
-                sample_matches = len(re.findall(regex_pattern, sample_text, re.IGNORECASE))
-                score += (field_matches * 0.4 + sample_matches * 0.6) / max(len(sample_values), 1)
+            for pattern in type_data['patterns']:
+                field_matches = len(re.findall(pattern, field_text, re.IGNORECASE))
+                sample_matches = len(re.findall(pattern, sample_text, re.IGNORECASE))
+                pattern_score = (field_matches * 0.4 + sample_matches * 0.6) / max(len(sample_values), 1)
+                score += min(pattern_score, 0.5)
                 
-            keyword_score = sum(1 for keyword in patterns['keywords'] if keyword in combined_text) / len(patterns['keywords'])
+            keyword_score = sum(1 for keyword in type_data['keywords'] if keyword in combined_text) / len(type_data['keywords'])
             score += keyword_score * 0.3
             
-            context_score = sum(1 for context in patterns['context'] if context in combined_text) / len(patterns['context'])
+            context_score = sum(1 for context in type_data['context'] if context in combined_text) / len(type_data['context'])
             score += context_score * 0.2
-            
-            pattern_consistency = self.calculate_pattern_consistency_for_type(sample_values, patterns)
-            score += pattern_consistency * 0.1
             
             semantic_scores[semantic_type] = min(score, 1.0)
             
-        tfidf_features = self.extract_tfidf_features(combined_text)
+        pattern_analysis = self.analyze_pure_patterns(sample_values)
+        statistical_features = self.extract_pure_statistics(sample_values)
+        entities = self.extract_pure_entities(sample_text)
+        sentiment = self.calculate_pure_sentiment(sample_text)
         
-        entities = self.extract_entities_basic(sample_text)
-        sentiment_score = self.calculate_sentiment_basic(sample_text)
-        
-        for entity_type, confidence in entities.items():
-            if entity_type in semantic_scores:
-                semantic_scores[entity_type] += confidence * 0.2
-                
-        if sentiment_score < -0.5:
-            semantic_scores['security_event'] += 0.3
-            
-        analysis = {
+        return {
             'semantic_scores': dict(semantic_scores),
-            'tfidf_features': tfidf_features,
+            'pattern_analysis': pattern_analysis,
+            'statistical_features': statistical_features,
             'entities': entities,
-            'sentiment_score': sentiment_score,
-            'pattern_analysis': self.analyze_patterns_advanced(sample_values),
-            'statistical_features': self.extract_statistical_features(sample_values)
+            'sentiment': sentiment
         }
         
-        return analysis
-        
-    def calculate_pattern_consistency_for_type(self, values: List[Any], patterns: Dict) -> float:
+    def analyze_pure_patterns(self, values: List[Any]) -> Dict:
         if not values:
-            return 0.0
+            return {}
             
-        consistent_count = 0
-        for value in values[:100]:
+        pattern_map = defaultdict(int)
+        length_distribution = []
+        
+        for value in values[:500]:
             if value is not None:
                 value_str = str(value)
-                for regex_pattern in patterns['regex']:
-                    if re.search(regex_pattern, value_str, re.IGNORECASE):
-                        consistent_count += 1
-                        break
-                        
-        return consistent_count / min(len(values), 100)
-        
-    def extract_tfidf_features(self, text: str) -> np.ndarray:
-        try:
-            if not hasattr(self, '_tfidf_fitted') or not self._tfidf_fitted:
-                corpus = [text]
-                self.tfidf_vectorizer.fit(corpus)
-                self._tfidf_fitted = True
+                length_distribution.append(len(value_str))
                 
-            features = self.tfidf_vectorizer.transform([text])
-            return features.toarray().flatten()
-        except:
-            return np.zeros(1000)
-            
-    def extract_entities_basic(self, text: str) -> Dict[str, float]:
-        entities = {}
-        
-        person_patterns = [r'\b[A-Z][a-z]+ [A-Z][a-z]+\b', r'\b(john|jane|admin|user|system)\b']
-        org_patterns = [r'\b[A-Z][a-z]+ (Inc|Corp|LLC|Ltd)\b', r'\b(company|corporation|department)\b']
-        location_patterns = [r'\b(usa|us|america|europe|asia|africa)\b', r'\b[A-Z][a-z]+, [A-Z]{2}\b']
-        
-        for pattern in person_patterns:
-            matches = len(re.findall(pattern, text, re.IGNORECASE))
-            if matches > 0:
-                entities['identity'] = min(matches / 10.0, 1.0)
-                
-        for pattern in org_patterns:
-            matches = len(re.findall(pattern, text, re.IGNORECASE))
-            if matches > 0:
-                entities['business_unit'] = min(matches / 5.0, 1.0)
-                
-        for pattern in location_patterns:
-            matches = len(re.findall(pattern, text, re.IGNORECASE))
-            if matches > 0:
-                entities['geographic'] = min(matches / 3.0, 1.0)
-                
-        return entities
-        
-    def calculate_sentiment_basic(self, text: str) -> float:
-        positive_words = ['good', 'great', 'excellent', 'success', 'secure', 'safe', 'protected', 'valid', 'authorized']
-        negative_words = ['bad', 'error', 'fail', 'attack', 'threat', 'breach', 'malware', 'virus', 'suspicious', 'denied', 'blocked']
-        
-        words = text.lower().split()
-        positive_count = sum(1 for word in words if any(pos in word for pos in positive_words))
-        negative_count = sum(1 for word in words if any(neg in word for neg in negative_words))
-        
-        if positive_count + negative_count == 0:
-            return 0.0
-            
-        return (positive_count - negative_count) / (positive_count + negative_count)
-        
-    def analyze_patterns_advanced(self, values: List[Any]) -> Dict:
-        pattern_analysis = {}
-        
-        if not values:
-            return pattern_analysis
-            
-        length_distribution = [len(str(v)) for v in values if v is not None]
-        if length_distribution:
-            pattern_analysis['avg_length'] = np.mean(length_distribution)
-            pattern_analysis['length_std'] = np.std(length_distribution)
-            pattern_analysis['length_consistency'] = 1.0 / (1.0 + np.std(length_distribution))
-            
-        char_patterns = defaultdict(int)
-        for value in values[:100]:
-            if value is not None:
-                value_str = str(value)
                 pattern = re.sub(r'\d', 'N', re.sub(r'[a-zA-Z]', 'A', value_str))
-                char_patterns[pattern] += 1
+                pattern_map[pattern] += 1
                 
-        if char_patterns:
-            most_common_pattern = max(char_patterns.values())
-            pattern_analysis['pattern_consistency'] = most_common_pattern / len(values[:100])
-            pattern_analysis['pattern_diversity'] = len(char_patterns) / len(values[:100])
+        if not pattern_map:
+            return {}
             
-        return pattern_analysis
+        most_common_pattern = max(pattern_map.values())
+        pattern_consistency = most_common_pattern / len(values[:500])
+        pattern_diversity = len(pattern_map) / len(values[:500])
         
-    def extract_statistical_features(self, values: List[Any]) -> Dict:
-        features = {}
+        avg_length = sum(length_distribution) / len(length_distribution) if length_distribution else 0
+        length_variance = sum((x - avg_length) ** 2 for x in length_distribution) / len(length_distribution) if length_distribution else 0
+        
+        return {
+            'pattern_consistency': pattern_consistency,
+            'pattern_diversity': pattern_diversity,
+            'avg_length': avg_length,
+            'length_variance': length_variance,
+            'unique_patterns': len(pattern_map)
+        }
+        
+    def extract_pure_statistics(self, values: List[Any]) -> Dict:
+        stats = {}
         
         numeric_values = []
         text_values = []
@@ -355,48 +325,85 @@ class UltraSemanticIntelligence:
                     text_values.append(str(val))
                     
         if numeric_values:
-            features['numeric'] = {
-                'mean': np.mean(numeric_values),
-                'std': np.std(numeric_values),
-                'min': np.min(numeric_values),
-                'max': np.max(numeric_values),
-                'skewness': self.calculate_skewness(numeric_values),
-                'kurtosis': self.calculate_kurtosis(numeric_values)
+            mean_val = sum(numeric_values) / len(numeric_values)
+            variance = sum((x - mean_val) ** 2 for x in numeric_values) / len(numeric_values)
+            std_dev = variance ** 0.5
+            
+            stats['numeric'] = {
+                'mean': mean_val,
+                'std': std_dev,
+                'min': min(numeric_values),
+                'max': max(numeric_values),
+                'range': max(numeric_values) - min(numeric_values),
+                'variance': variance
             }
             
         if text_values:
-            features['text'] = {
-                'avg_length': np.mean([len(s) for s in text_values]),
-                'unique_chars': len(set(''.join(text_values))),
-                'alpha_ratio': sum(1 for s in text_values if s.isalpha()) / len(text_values),
-                'digit_ratio': sum(1 for s in text_values if s.isdigit()) / len(text_values)
+            total_length = sum(len(s) for s in text_values)
+            all_chars = ''.join(text_values)
+            unique_chars = len(set(all_chars))
+            
+            stats['text'] = {
+                'avg_length': total_length / len(text_values),
+                'unique_chars': unique_chars,
+                'total_chars': len(all_chars),
+                'alpha_ratio': sum(1 for c in all_chars if c.isalpha()) / len(all_chars) if all_chars else 0,
+                'digit_ratio': sum(1 for c in all_chars if c.isdigit()) / len(all_chars) if all_chars else 0
             }
             
-        return features
+        return stats
         
-    def calculate_skewness(self, values):
-        mean = np.mean(values)
-        std = np.std(values)
-        return np.mean([(x - mean)**3 for x in values]) / (std**3) if std > 0 else 0
+    def extract_pure_entities(self, text: str) -> Dict[str, float]:
+        entities = {}
         
-    def calculate_kurtosis(self, values):
-        mean = np.mean(values)
-        std = np.std(values)
-        return np.mean([(x - mean)**4 for x in values]) / (std**4) - 3 if std > 0 else 0
+        person_patterns = [r'\b[A-Z][a-z]+ [A-Z][a-z]+\b', r'\b(admin|user|system|service)\b']
+        org_patterns = [r'\b[A-Z][a-z]+ (Inc|Corp|LLC|Ltd)\b', r'\b(company|corporation|department)\b']
+        location_patterns = [r'\b(usa|us|america|europe|asia|africa)\b', r'\b[A-Z][a-z]+, [A-Z]{2}\b']
+        
+        for pattern in person_patterns:
+            matches = len(re.findall(pattern, text, re.IGNORECASE))
+            if matches > 0:
+                entities['identity'] = min(matches / 5.0, 1.0)
+                
+        for pattern in org_patterns:
+            matches = len(re.findall(pattern, text, re.IGNORECASE))
+            if matches > 0:
+                entities['business_unit'] = min(matches / 3.0, 1.0)
+                
+        for pattern in location_patterns:
+            matches = len(re.findall(pattern, text, re.IGNORECASE))
+            if matches > 0:
+                entities['geographic'] = min(matches / 2.0, 1.0)
+                
+        return entities
+        
+    def calculate_pure_sentiment(self, text: str) -> float:
+        positive_words = ['good', 'great', 'excellent', 'success', 'secure', 'safe', 'protected', 'valid', 'authorized', 'approved']
+        negative_words = ['bad', 'error', 'fail', 'attack', 'threat', 'breach', 'malware', 'virus', 'suspicious', 'denied', 'blocked', 'critical']
+        
+        words = text.lower().split()
+        positive_count = sum(1 for word in words if any(pos in word for pos in positive_words))
+        negative_count = sum(1 for word in words if any(neg in word for neg in negative_words))
+        
+        total_sentiment_words = positive_count + negative_count
+        if total_sentiment_words == 0:
+            return 0.0
+            
+        return (positive_count - negative_count) / total_sentiment_words
 
-class UltraIntelligentAO1Engine:
-    def __init__(self, database_path: str, perfection_threshold: float = 0.99, max_iterations: int = 100000):
+class PureIntelligentAO1Engine:
+    def __init__(self, database_path: str, perfection_threshold: float = 0.95, max_iterations: int = 50000):
         self.database_path = database_path
         self.perfection_threshold = perfection_threshold
         self.max_iterations = max_iterations
-        self.field_intelligence: Dict[str, UltraFieldIntelligence] = {}
-        self.ultra_queries: List[UltraIntelligentQuery] = []
-        self.semantic_engine = UltraSemanticIntelligence()
-        self.knowledge_graph = nx.Graph()
+        self.field_intelligence: Dict[str, PureFieldIntelligence] = {}
+        self.pure_queries: List[PureIntelligentQuery] = []
+        self.semantic_engine = PureSemanticEngine()
+        self.relationships = {}
         self.iteration_count = 0
         self.perfection_score = 0.0
         self.connection = None
-        self.consciousness_matrix = np.zeros((100, 100))
+        self.consciousness_score = 0.0
         self.intelligence_evolution = []
         
         self.ao1_requirements = {
@@ -421,12 +428,12 @@ class UltraIntelligentAO1Engine:
                 self.connection = duckdb.connect(self.database_path)
             else:
                 self.connection = sqlite3.connect(self.database_path)
-            logger.info(f"Connected to ultra-intelligent database: {self.database_path}")
+            logger.info(f"Connected to pure intelligent database: {self.database_path}")
         except Exception as e:
-            logger.error(f"Ultra-intelligent database connection failed: {e}")
+            logger.error(f"Pure intelligent database connection failed: {e}")
             raise
             
-    def discover_schema_ultra(self) -> Dict[str, List[str]]:
+    def discover_schema_pure(self) -> Dict[str, List[str]]:
         schema = {}
         try:
             if isinstance(self.connection, duckdb.DuckDBPyConnection):
@@ -443,19 +450,18 @@ class UltraIntelligentAO1Engine:
                     columns = self.connection.execute(f"PRAGMA table_info({table})").fetchall()
                     schema[table] = [(col[1], col[2]) for col in columns]
                     
-            logger.info(f"Ultra schema discovery: {len(schema)} tables, {sum(len(cols) for cols in schema.values())} columns")
+            logger.info(f"Pure schema discovery: {len(schema)} tables, {sum(len(cols) for cols in schema.values())} columns")
             return schema
         except Exception as e:
-            logger.error(f"Ultra schema discovery failed: {e}")
+            logger.error(f"Pure schema discovery failed: {e}")
             return {}
             
-    def sample_field_data_ultra(self, table: str, column: str, sample_size: int = 10000) -> List[Any]:
+    def sample_field_data_pure(self, table: str, column: str, sample_size: int = 5000) -> List[Any]:
         samples = []
         strategies = [
-            f"SELECT DISTINCT {column} FROM {table} WHERE {column} IS NOT NULL ORDER BY RANDOM() LIMIT {sample_size//4}",
-            f"SELECT {column}, COUNT(*) as freq FROM {table} WHERE {column} IS NOT NULL GROUP BY {column} ORDER BY freq DESC LIMIT {sample_size//4}",
-            f"SELECT {column} FROM {table} WHERE {column} IS NOT NULL ORDER BY rowid DESC LIMIT {sample_size//4}",
-            f"SELECT {column} FROM {table} WHERE {column} IS NOT NULL AND LENGTH(TRIM(CAST({column} AS TEXT))) > 0 LIMIT {sample_size//4}"
+            f"SELECT DISTINCT {column} FROM {table} WHERE {column} IS NOT NULL ORDER BY RANDOM() LIMIT {sample_size//3}",
+            f"SELECT {column} FROM {table} WHERE {column} IS NOT NULL LIMIT {sample_size//3}",
+            f"SELECT {column} FROM {table} WHERE {column} IS NOT NULL ORDER BY {column} LIMIT {sample_size//3}"
         ]
         
         for strategy in strategies:
@@ -468,235 +474,200 @@ class UltraIntelligentAO1Engine:
                 
         return list(set(samples))[:sample_size]
         
-    def analyze_field_ultra_intelligent(self, table: str, column: str, data_type: str) -> UltraFieldIntelligence:
+    def analyze_field_pure_intelligent(self, table: str, column: str, data_type: str) -> PureFieldIntelligence:
         try:
-            sample_values = self.sample_field_data_ultra(table, column)
+            sample_values = self.sample_field_data_pure(table, column)
             
-            ultra_analysis = self.semantic_engine.analyze_field_ultra(column, sample_values, table)
+            pure_analysis = self.semantic_engine.analyze_field_pure(column, sample_values, table)
             
-            semantic_scores = ultra_analysis['semantic_scores']
+            semantic_scores = pure_analysis['semantic_scores']
             semantic_type = max(semantic_scores.keys(), key=lambda k: semantic_scores[k]) if semantic_scores else "unknown"
             confidence = max(semantic_scores.values()) if semantic_scores else 0.0
             
-            statistical_profile = ultra_analysis.get('statistical_features', {})
-            entropy_score = self.calculate_entropy_ultra(sample_values)
-            cardinality_ratio = len(set(sample_values)) / len(sample_values) if sample_values else 0
-            null_ratio = len([v for v in sample_values if v is None]) / len(sample_values) if sample_values else 0
+            ao1_relevance = self.calculate_ao1_relevance_pure(semantic_type, semantic_scores)
+            business_context = self.infer_business_context_pure(semantic_type, column, sample_values)
+            security_relevance = self.calculate_security_relevance_pure(semantic_type, semantic_scores)
+            quality_score = self.calculate_quality_score_pure(sample_values, semantic_scores)
             
-            pattern_analysis = ultra_analysis.get('pattern_analysis', {})
-            pattern_consistency = pattern_analysis.get('pattern_consistency', 0.0)
+            pattern_analysis = pure_analysis.get('pattern_analysis', {})
+            pattern_strength = pattern_analysis.get('pattern_consistency', 0.0)
             
-            field_intel = UltraFieldIntelligence(
+            uniqueness_ratio = len(set(sample_values)) / len(sample_values) if sample_values else 0
+            completeness_ratio = len([v for v in sample_values if v is not None]) / len(sample_values) if sample_values else 0
+            
+            intelligence_score = self.calculate_intelligence_score_pure(pure_analysis, confidence, quality_score)
+            consciousness_level = self.calculate_consciousness_level_pure(pure_analysis, semantic_scores)
+            
+            field_intel = PureFieldIntelligence(
                 name=column,
                 table=table,
                 data_type=data_type,
-                sample_values=sample_values[:200],
+                sample_values=sample_values[:100],
                 semantic_patterns=semantic_scores,
                 semantic_type=semantic_type,
                 confidence=confidence,
-                ao1_relevance=self.calculate_ao1_relevance_ultra(semantic_type, semantic_scores, statistical_profile),
-                business_context=self.infer_business_context_ultra(semantic_type, column, sample_values),
-                security_relevance=self.calculate_security_relevance_ultra(semantic_type, semantic_scores),
-                quality_score=self.calculate_quality_score_ultra(sample_values, semantic_scores, statistical_profile),
-                entropy_score=entropy_score,
-                cardinality_ratio=cardinality_ratio,
-                null_ratio=null_ratio,
-                pattern_consistency=pattern_consistency,
-                statistical_profile=statistical_profile,
-                intelligence_score=self.calculate_intelligence_score(ultra_analysis),
-                consciousness_level=self.calculate_consciousness_level(ultra_analysis, semantic_scores)
+                ao1_relevance=ao1_relevance,
+                business_context=business_context,
+                security_relevance=security_relevance,
+                quality_score=quality_score,
+                intelligence_score=intelligence_score,
+                consciousness_level=consciousness_level,
+                pattern_strength=pattern_strength,
+                uniqueness_ratio=uniqueness_ratio,
+                completeness_ratio=completeness_ratio
             )
             
-            field_intel = self.evolve_field_intelligence(field_intel)
+            field_intel = self.evolve_field_pure(field_intel)
             
-            logger.info(f"Ultra-intelligent analysis {table}.{column}: {semantic_type} (confidence: {confidence:.4f}, intelligence: {field_intel.intelligence_score:.4f})")
+            logger.info(f"Pure intelligent analysis {table}.{column}: {semantic_type} (confidence: {confidence:.3f}, intelligence: {intelligence_score:.3f})")
             return field_intel
             
         except Exception as e:
-            logger.error(f"Ultra-intelligent field analysis failed for {table}.{column}: {e}")
-            return UltraFieldIntelligence(name=column, table=table, data_type=data_type)
+            logger.error(f"Pure intelligent field analysis failed for {table}.{column}: {e}")
+            return PureFieldIntelligence(name=column, table=table, data_type=data_type)
             
-    def calculate_entropy_ultra(self, values: List[Any]) -> float:
-        try:
-            value_counts = Counter(values)
-            probabilities = np.array(list(value_counts.values())) / len(values)
-            return entropy(probabilities)
-        except:
-            return 0.0
-            
-    def calculate_ao1_relevance_ultra(self, semantic_type: str, semantic_scores: Dict[str, float], statistical_profile: Dict) -> float:
-        base_weights = {
-            'hostname': 0.95, 'ip_address': 0.95, 'security_event': 0.98, 'cloud_resource': 0.88,
-            'network_device': 0.85, 'endpoint': 0.85, 'application': 0.75, 'identity': 0.90,
-            'log_type': 0.80, 'geographic': 0.75, 'asset_identifier': 0.95, 'security_control': 0.98,
-            'business_unit': 0.65, 'compliance': 0.85, 'performance': 0.55, 'time_field': 0.75
-        }
+    def calculate_ao1_relevance_pure(self, semantic_type: str, semantic_scores: Dict[str, float]) -> float:
+        weights = self.semantic_engine.pattern_library.get(semantic_type, {}).get('weight', 0.5)
+        base_score = semantic_scores.get(semantic_type, 0.0) * weights
         
-        base_relevance = 0.0
-        for sem_type, score in semantic_scores.items():
-            weight = base_weights.get(sem_type, 0.3)
-            base_relevance += score * weight
-            
-        quality_multiplier = 1.0
-        if 'numeric' in statistical_profile:
-            if statistical_profile['numeric'].get('std', 0) > 0:
-                quality_multiplier += 0.1
-        if 'text' in statistical_profile:
-            if statistical_profile['text'].get('unique_chars', 0) > 10:
-                quality_multiplier += 0.1
+        cross_semantic_boost = 0.0
+        high_value_types = ['hostname', 'ip_address', 'security_event', 'security_control', 'asset_identifier']
+        for hvt in high_value_types:
+            if hvt in semantic_scores and hvt != semantic_type:
+                cross_semantic_boost += semantic_scores[hvt] * 0.1
                 
-        intelligence_boost = self.calculate_intelligence_boost(semantic_scores, statistical_profile)
+        return min(base_score + cross_semantic_boost, 1.0)
         
-        return min(base_relevance * quality_multiplier + intelligence_boost, 1.0)
-        
-    def calculate_intelligence_boost(self, semantic_scores: Dict, statistical_profile: Dict) -> float:
-        boost = 0.0
-        
-        semantic_diversity = len([score for score in semantic_scores.values() if score > 0.1])
-        boost += min(semantic_diversity / 10.0, 0.2)
-        
-        if 'numeric' in statistical_profile:
-            skewness = abs(statistical_profile['numeric'].get('skewness', 0))
-            if 0.5 < skewness < 2.0:
-                boost += 0.1
-                
-        if 'text' in statistical_profile:
-            alpha_ratio = statistical_profile['text'].get('alpha_ratio', 0)
-            if 0.3 < alpha_ratio < 0.8:
-                boost += 0.1
-                
-        return boost
-        
-    def infer_business_context_ultra(self, semantic_type: str, column_name: str, sample_values: List[Any]) -> str:
+    def infer_business_context_pure(self, semantic_type: str, column_name: str, sample_values: List[Any]) -> str:
         contexts = {
-            'hostname': 'IT Infrastructure - Ultra-intelligent server and endpoint identification with advanced network topology awareness',
-            'ip_address': 'Network Infrastructure - AI-powered IP address management with intelligent routing optimization and security zone mapping',
-            'security_event': 'Security Operations - Ultra-advanced threat detection with behavioral analytics and automated incident correlation',
-            'cloud_resource': 'Cloud Infrastructure - Multi-cloud service orchestration with cost optimization and security automation',
-            'network_device': 'Network Operations - SDN-aware network device management with predictive maintenance and performance optimization',
-            'endpoint': 'Endpoint Management - Zero-trust endpoint security with behavioral monitoring and compliance automation',
-            'application': 'Application Operations - Full-stack observability with performance prediction and automated scaling',
-            'identity': 'Identity Management - AI-driven identity governance with risk-based authentication and privilege optimization',
-            'log_type': 'Log Management - Intelligent log analytics with anomaly detection and automated correlation',
-            'geographic': 'Geographic Intelligence - Location-based risk assessment with regulatory compliance mapping',
-            'asset_identifier': 'Asset Management - Automated asset discovery with lifecycle prediction and cost optimization',
-            'security_control': 'Security Controls - Adaptive security orchestration with threat intelligence integration',
-            'business_unit': 'Business Operations - Organizational intelligence with performance analytics and resource optimization',
-            'compliance': 'Compliance Management - Automated compliance monitoring with risk assessment and remediation workflows',
-            'performance': 'Performance Intelligence - Predictive performance analytics with capacity planning and optimization',
-            'time_field': 'Temporal Analytics - Advanced time-series analysis with pattern recognition and forecasting'
+            'hostname': 'IT Infrastructure - Pure intelligent server and endpoint identification',
+            'ip_address': 'Network Infrastructure - Pure intelligent IP address management and routing',
+            'security_event': 'Security Operations - Pure intelligent threat detection and incident response',
+            'cloud_resource': 'Cloud Infrastructure - Pure intelligent cloud service management',
+            'network_device': 'Network Operations - Pure intelligent network device management',
+            'endpoint': 'Endpoint Management - Pure intelligent endpoint security and monitoring',
+            'application': 'Application Operations - Pure intelligent application monitoring',
+            'identity': 'Identity Management - Pure intelligent identity and access control',
+            'log_type': 'Log Management - Pure intelligent log analytics and monitoring',
+            'geographic': 'Geographic Intelligence - Pure intelligent location-based analytics',
+            'asset_identifier': 'Asset Management - Pure intelligent asset tracking and lifecycle',
+            'security_control': 'Security Controls - Pure intelligent security orchestration',
+            'business_unit': 'Business Operations - Pure intelligent organizational analytics',
+            'compliance': 'Compliance Management - Pure intelligent compliance monitoring',
+            'performance': 'Performance Intelligence - Pure intelligent performance analytics',
+            'time_field': 'Temporal Analytics - Pure intelligent time-series analysis'
         }
         
-        base_context = contexts.get(semantic_type, 'Ultra-Advanced Data Analytics - Requires deep intelligence analysis')
+        base_context = contexts.get(semantic_type, 'Pure Intelligent Data Analytics')
         
         try:
-            sample_text = ' '.join([str(v) for v in sample_values[:50] if v is not None]).lower()
+            sample_text = ' '.join([str(v) for v in sample_values[:20] if v is not None]).lower()
             
-            if any(word in sample_text for word in ['critical', 'high', 'priority']):
-                base_context += ' | ULTRA HIGH PRIORITY'
+            if any(word in sample_text for word in ['critical', 'high', 'priority', 'important']):
+                base_context += ' | HIGH PRIORITY'
             if any(word in sample_text for word in ['production', 'prod', 'live']):
-                base_context += ' | PRODUCTION CRITICAL'
+                base_context += ' | PRODUCTION'
             if any(word in sample_text for word in ['security', 'secure', 'protected']):
-                base_context += ' | SECURITY ULTRA-CRITICAL'
+                base_context += ' | SECURITY CRITICAL'
                 
         except:
             pass
             
         return base_context
         
-    def calculate_security_relevance_ultra(self, semantic_type: str, semantic_scores: Dict[str, float]) -> float:
-        pattern_data = self.semantic_engine.semantic_patterns.get(semantic_type, {})
-        security_weight = pattern_data.get('security_weight', 0.5)
+    def calculate_security_relevance_pure(self, semantic_type: str, semantic_scores: Dict[str, float]) -> float:
+        security_weights = {
+            'security_event': 1.0, 'security_control': 1.0, 'identity': 0.9, 'hostname': 0.8,
+            'ip_address': 0.8, 'network_device': 0.8, 'endpoint': 0.8, 'cloud_resource': 0.7,
+            'asset_identifier': 0.7, 'compliance': 0.9, 'log_type': 0.6, 'application': 0.5
+        }
         
-        base_relevance = semantic_scores.get(semantic_type, 0.0) * security_weight
+        base_relevance = semantic_scores.get(semantic_type, 0.0) * security_weights.get(semantic_type, 0.3)
         
         security_boost = 0.0
         for sec_type in ['security_event', 'security_control', 'identity']:
-            if sec_type in semantic_scores:
-                security_boost += semantic_scores[sec_type] * 0.1
+            if sec_type in semantic_scores and sec_type != semantic_type:
+                security_boost += semantic_scores[sec_type] * 0.15
                 
         return min(base_relevance + security_boost, 1.0)
         
-    def calculate_quality_score_ultra(self, sample_values: List[Any], semantic_scores: Dict[str, float], statistical_profile: Dict) -> float:
+    def calculate_quality_score_pure(self, sample_values: List[Any], semantic_scores: Dict[str, float]) -> float:
         if not sample_values:
             return 0.0
             
         completeness = len([v for v in sample_values if v is not None]) / len(sample_values)
-        uniqueness = len(set(sample_values)) / len(sample_values) if sample_values else 0
+        uniqueness = len(set(sample_values)) / len(sample_values)
         consistency = max(semantic_scores.values()) if semantic_scores else 0.0
         
-        statistical_quality = 0.5
-        if 'numeric' in statistical_profile:
-            std = statistical_profile['numeric'].get('std', 0)
-            mean = statistical_profile['numeric'].get('mean', 1)
-            cv = std / abs(mean) if mean != 0 else 0
-            statistical_quality = 1.0 / (1.0 + cv)
-        elif 'text' in statistical_profile:
-            avg_length = statistical_profile['text'].get('avg_length', 0)
-            statistical_quality = min(avg_length / 20.0, 1.0)
-            
-        intelligence_quality = self.calculate_intelligence_quality(sample_values, semantic_scores)
+        pattern_quality = 0.5
+        if sample_values:
+            pattern_counts = Counter()
+            for val in sample_values[:100]:
+                if val is not None:
+                    pattern = re.sub(r'\d', 'N', re.sub(r'[a-zA-Z]', 'A', str(val)))
+                    pattern_counts[pattern] += 1
+            if pattern_counts:
+                most_common_count = pattern_counts.most_common(1)[0][1]
+                pattern_quality = most_common_count / min(len(sample_values), 100)
+                
+        return (completeness * 0.3 + uniqueness * 0.25 + consistency * 0.25 + pattern_quality * 0.2)
         
-        return (completeness * 0.25 + uniqueness * 0.20 + consistency * 0.20 + statistical_quality * 0.20 + intelligence_quality * 0.15)
-        
-    def calculate_intelligence_quality(self, sample_values: List[Any], semantic_scores: Dict) -> float:
-        if len(sample_values) < 5:
-            return 0.3
-            
-        pattern_diversity = len(set(str(v)[:3] for v in sample_values if v is not None))
-        max_diversity = min(len(sample_values), 20)
-        diversity_score = pattern_diversity / max_diversity
-        
-        semantic_confidence = sum(semantic_scores.values()) / len(semantic_scores) if semantic_scores else 0.0
-        
-        return (diversity_score + semantic_confidence) / 2.0
-        
-    def calculate_intelligence_score(self, analysis: Dict) -> float:
+    def calculate_intelligence_score_pure(self, analysis: Dict, confidence: float, quality_score: float) -> float:
         components = []
         
-        semantic_strength = sum(analysis.get('semantic_scores', {}).values())
-        components.append(min(semantic_strength, 1.0))
+        semantic_diversity = len([score for score in analysis.get('semantic_scores', {}).values() if score > 0.1])
+        components.append(min(semantic_diversity / 8.0, 1.0))
         
-        pattern_quality = 0.5
-        pattern_analysis = analysis.get('pattern_analysis', {})
-        if pattern_analysis:
-            pattern_quality = pattern_analysis.get('pattern_consistency', 0.5)
-        components.append(pattern_quality)
+        pattern_intelligence = analysis.get('pattern_analysis', {}).get('pattern_consistency', 0.5)
+        components.append(pattern_intelligence)
         
         statistical_complexity = 0.5
         stats = analysis.get('statistical_features', {})
         if 'numeric' in stats:
-            skew = abs(stats['numeric'].get('skewness', 0))
-            kurt = abs(stats['numeric'].get('kurtosis', 0))
-            statistical_complexity = min((skew + kurt) / 4.0, 1.0)
+            range_val = stats['numeric'].get('range', 0)
+            std_val = stats['numeric'].get('std', 0)
+            if range_val > 0 and std_val > 0:
+                statistical_complexity = min((std_val / range_val) * 2, 1.0)
         components.append(statistical_complexity)
         
-        tfidf_strength = 0.5
-        tfidf_features = analysis.get('tfidf_features', np.array([]))
-        if len(tfidf_features) > 0:
-            tfidf_strength = min(np.sum(tfidf_features > 0) / len(tfidf_features), 1.0)
-        components.append(tfidf_strength)
+        entity_awareness = len(analysis.get('entities', {})) / 3.0
+        components.append(min(entity_awareness, 1.0))
         
-        return np.mean(components)
+        confidence_factor = confidence
+        components.append(confidence_factor)
         
-    def calculate_consciousness_level(self, analysis: Dict, semantic_scores: Dict) -> float:
+        quality_factor = quality_score
+        components.append(quality_factor)
+        
+        return sum(components) / len(components)
+        
+    def calculate_consciousness_level_pure(self, analysis: Dict, semantic_scores: Dict) -> float:
         awareness_factors = []
         
-        semantic_awareness = len([score for score in semantic_scores.values() if score > 0.3]) / len(semantic_scores)
+        semantic_awareness = len([score for score in semantic_scores.values() if score > 0.2]) / len(semantic_scores)
         awareness_factors.append(semantic_awareness)
         
-        entity_awareness = len(analysis.get('entities', {})) / 5.0
+        entity_awareness = len(analysis.get('entities', {})) / 3.0
         awareness_factors.append(min(entity_awareness, 1.0))
         
-        sentiment_awareness = abs(analysis.get('sentiment_score', 0.0))
+        sentiment_awareness = abs(analysis.get('sentiment', 0.0))
         awareness_factors.append(sentiment_awareness)
         
         pattern_awareness = analysis.get('pattern_analysis', {}).get('pattern_diversity', 0.5)
-        awareness_factors.append(pattern_awareness)
+        awareness_factors.append(min(pattern_awareness, 1.0))
         
-        return np.mean(awareness_factors)
+        statistical_awareness = 0.5
+        if 'statistical_features' in analysis:
+            stats = analysis['statistical_features']
+            if 'numeric' in stats and 'text' in stats:
+                statistical_awareness = 0.8
+            elif 'numeric' in stats or 'text' in stats:
+                statistical_awareness = 0.6
+        awareness_factors.append(statistical_awareness)
         
-    def evolve_field_intelligence(self, field_intel: UltraFieldIntelligence) -> UltraFieldIntelligence:
+        return sum(awareness_factors) / len(awareness_factors)
+        
+    def evolve_field_pure(self, field_intel: PureFieldIntelligence) -> PureFieldIntelligence:
         evolution_factors = [
             field_intel.confidence,
             field_intel.ao1_relevance,
@@ -705,54 +676,38 @@ class UltraIntelligentAO1Engine:
             field_intel.consciousness_level
         ]
         
-        evolution_score = np.mean(evolution_factors)
+        evolution_score = sum(evolution_factors) / len(evolution_factors)
         
         if evolution_score > 0.8:
-            field_intel.confidence = min(field_intel.confidence * 1.1, 1.0)
-            field_intel.ao1_relevance = min(field_intel.ao1_relevance * 1.05, 1.0)
+            field_intel.confidence = min(field_intel.confidence * 1.05, 1.0)
+            field_intel.ao1_relevance = min(field_intel.ao1_relevance * 1.03, 1.0)
+            field_intel.intelligence_score = min(field_intel.intelligence_score * 1.02, 1.0)
         elif evolution_score < 0.4:
-            field_intel.confidence = max(field_intel.confidence * 0.95, 0.1)
+            field_intel.confidence = max(field_intel.confidence * 0.98, 0.1)
             
-        field_intel.evolution_history.append({
-            'timestamp': datetime.now().isoformat(),
-            'evolution_score': evolution_score,
-            'factors': evolution_factors
-        })
+        field_intel.evolution_count += 1
         
         return field_intel
         
-    def build_ultra_knowledge_graph(self):
-        logger.info("Building ultra-intelligent knowledge graph...")
+    def build_pure_relationships(self):
+        logger.info("Building pure intelligent relationships...")
         
+        relationship_count = 0
         for field1_key, field1 in self.field_intelligence.items():
             for field2_key, field2 in self.field_intelligence.items():
                 if field1_key != field2_key:
-                    relationship_strength = self.calculate_ultra_relationship(field1, field2)
+                    relationship_strength = self.calculate_pure_relationship(field1, field2)
                     
                     if relationship_strength > 0.5:
-                        self.knowledge_graph.add_edge(field1_key, field2_key, weight=relationship_strength)
+                        if field1_key not in self.relationships:
+                            self.relationships[field1_key] = []
+                        self.relationships[field1_key].append((field2_key, relationship_strength))
                         field1.relationships.append(field2_key)
+                        relationship_count += 1
                         
-        for node in self.knowledge_graph.nodes():
-            centrality = nx.degree_centrality(self.knowledge_graph)[node]
-            if node in self.field_intelligence:
-                self.field_intelligence[node].network_centrality = centrality
-                
-        try:
-            communities = nx.community.greedy_modularity_communities(self.knowledge_graph)
-            node_to_community = {node: i for i, community in enumerate(communities) for node in community}
-            
-            for node, community_id in node_to_community.items():
-                if node in self.field_intelligence:
-                    self.field_intelligence[node].cluster_membership = community_id
-        except:
-            for node in self.knowledge_graph.nodes():
-                if node in self.field_intelligence:
-                    self.field_intelligence[node].cluster_membership = 0
-                    
-        logger.info(f"Ultra knowledge graph: {self.knowledge_graph.number_of_edges()} relationships")
+        logger.info(f"Pure relationships built: {relationship_count} connections")
         
-    def calculate_ultra_relationship(self, field1: UltraFieldIntelligence, field2: UltraFieldIntelligence) -> float:
+    def calculate_pure_relationship(self, field1: PureFieldIntelligence, field2: PureFieldIntelligence) -> float:
         strength = 0.0
         
         if field1.table == field2.table:
@@ -761,67 +716,56 @@ class UltraIntelligentAO1Engine:
         if field1.semantic_type == field2.semantic_type:
             strength += 0.3
             
-        semantic_similarity = self.calculate_semantic_similarity_ultra(field1.semantic_type, field2.semantic_type)
-        strength += semantic_similarity * 0.2
+        similarity_matrix = {
+            'hostname': ['ip_address', 'network_device', 'endpoint'],
+            'ip_address': ['hostname', 'network_device', 'geographic'],
+            'security_event': ['security_control', 'log_type', 'identity'],
+            'identity': ['endpoint', 'security_event', 'business_unit'],
+            'application': ['performance', 'log_type', 'endpoint']
+        }
         
-        intelligence_correlation = abs(field1.intelligence_score - field2.intelligence_score)
-        strength += (1.0 - intelligence_correlation) * 0.1
-        
-        consciousness_alignment = abs(field1.consciousness_level - field2.consciousness_level)
-        strength += (1.0 - consciousness_alignment) * 0.1
-        
-        quality_correlation = abs(field1.quality_score - field2.quality_score)
-        strength += (1.0 - quality_correlation) * 0.1
+        related_types = similarity_matrix.get(field1.semantic_type, [])
+        if field2.semantic_type in related_types:
+            strength += 0.2
+            
+        intelligence_similarity = 1.0 - abs(field1.intelligence_score - field2.intelligence_score)
+        strength += intelligence_similarity * 0.1
         
         return min(strength, 1.0)
         
-    def calculate_semantic_similarity_ultra(self, type1: str, type2: str) -> float:
-        similarity_matrix = {
-            'hostname': {'ip_address': 0.9, 'network_device': 0.8, 'endpoint': 0.7, 'asset_identifier': 0.6},
-            'ip_address': {'hostname': 0.9, 'network_device': 0.8, 'geographic': 0.6},
-            'security_event': {'security_control': 0.95, 'log_type': 0.8, 'compliance': 0.7, 'identity': 0.6},
-            'cloud_resource': {'network_device': 0.7, 'application': 0.6, 'geographic': 0.5},
-            'identity': {'endpoint': 0.8, 'security_event': 0.7, 'compliance': 0.6, 'business_unit': 0.5},
-            'application': {'performance': 0.9, 'log_type': 0.7, 'endpoint': 0.6}
-        }
-        
-        return similarity_matrix.get(type1, {}).get(type2, 0.0)
-        
-    def generate_ultra_intelligent_query(self, requirement: str, requirement_data: Dict) -> UltraIntelligentQuery:
-        relevant_fields = self.find_ultra_relevant_fields(requirement)
+    def generate_pure_intelligent_query(self, requirement: str, requirement_data: Dict) -> PureIntelligentQuery:
+        relevant_fields = self.find_pure_relevant_fields(requirement)
         
         if not relevant_fields:
-            logger.warning(f"No ultra-relevant fields found for requirement: {requirement}")
+            logger.warning(f"No pure relevant fields found for requirement: {requirement}")
             return None
             
-        sql, execution_plan, performance_metrics = self.generate_ultra_ao1_query(requirement, relevant_fields)
+        sql = self.generate_pure_ao1_query(requirement, relevant_fields)
         
-        query = UltraIntelligentQuery(
-            name=f"ULTRA_AO1_{requirement.upper()}",
+        query = PureIntelligentQuery(
+            name=f"PURE_AO1_{requirement.upper()}",
             description=requirement_data['description'],
             sql=sql,
             ao1_requirement=requirement,
             confluence_section=requirement_data['confluence_section'],
             priority=requirement_data['priority'],
-            field_intelligence=relevant_fields,
-            execution_plan=execution_plan,
-            performance_metrics=performance_metrics
+            field_intelligence=relevant_fields
         )
         
-        query.semantic_accuracy = self.calculate_ultra_semantic_accuracy(query, relevant_fields)
-        query.coverage_completeness = self.calculate_ultra_coverage(query, relevant_fields)
-        query.business_alignment = self.calculate_ultra_business_alignment(query, requirement_data)
-        query.intelligence_level = self.calculate_query_intelligence_level(query, relevant_fields)
-        query.consciousness_alignment = self.calculate_consciousness_alignment(query, relevant_fields)
-        query.perfection_score = self.calculate_ultra_perfection(query)
+        query.semantic_accuracy = self.calculate_pure_semantic_accuracy(query, relevant_fields)
+        query.coverage_completeness = self.calculate_pure_coverage(query, relevant_fields)
+        query.business_alignment = self.calculate_pure_business_alignment(query, requirement_data)
+        query.intelligence_level = self.calculate_query_intelligence_pure(query, relevant_fields)
+        query.consciousness_alignment = self.calculate_consciousness_alignment_pure(query, relevant_fields)
+        query.perfection_score = self.calculate_pure_perfection(query)
         
-        query.validation_status = self.validate_ultra_query(query.sql)
-        query.optimization_suggestions = self.generate_ultra_optimization_suggestions(query)
+        query.validation_status = self.validate_pure_query(query.sql)
+        query.optimization_suggestions = self.generate_pure_optimization_suggestions(query)
         
-        logger.info(f"Generated ultra-intelligent query {requirement}: perfection={query.perfection_score:.4f}, intelligence={query.intelligence_level:.4f}")
+        logger.info(f"Generated pure intelligent query {requirement}: perfection={query.perfection_score:.3f}")
         return query
         
-    def find_ultra_relevant_fields(self, requirement: str) -> List[UltraFieldIntelligence]:
+    def find_pure_relevant_fields(self, requirement: str) -> List[PureFieldIntelligence]:
         requirement_mappings = {
             'global_view': ['asset_identifier', 'hostname', 'ip_address', 'geographic'],
             'infrastructure_type': ['cloud_resource', 'network_device', 'endpoint', 'application'],
@@ -843,597 +787,397 @@ class UltraIntelligentAO1Engine:
         candidates = []
         for field in self.field_intelligence.values():
             if field.semantic_type in target_types:
-                ultra_score = (
+                pure_score = (
                     field.ao1_relevance * 0.25 +
                     field.confidence * 0.20 +
                     field.quality_score * 0.20 +
                     field.intelligence_score * 0.20 +
                     field.consciousness_level * 0.15
                 )
-                candidates.append((field, ultra_score))
+                candidates.append((field, pure_score))
                 
         candidates.sort(key=lambda x: x[1], reverse=True)
         
-        selected_fields = [field for field, score in candidates[:12] if score > 0.7]
+        selected_fields = [field for field, score in candidates[:10] if score > 0.6]
         
         if len(selected_fields) < 3:
-            selected_fields.extend([field for field, score in candidates[12:20] if score > 0.5])
+            selected_fields.extend([field for field, score in candidates[10:15] if score > 0.4])
             
-        return selected_fields[:15]
+        return selected_fields[:12]
         
-    def generate_ultra_ao1_query(self, requirement: str, relevant_fields: List[UltraFieldIntelligence]) -> Tuple[str, Dict, Dict]:
+    def generate_pure_ao1_query(self, requirement: str, relevant_fields: List[PureFieldIntelligence]) -> str:
         if not relevant_fields:
-            return f"-- No ultra-relevant fields found for {requirement}", {}, {}
+            return f"-- No pure relevant fields found for {requirement}"
             
         primary_field = relevant_fields[0]
-        secondary_fields = relevant_fields[1:4]
         
-        ultra_sql = f"""
-        WITH ultra_intelligent_analysis AS (
+        pure_sql = f"""
+        WITH pure_intelligent_analysis AS (
             SELECT 
-                {primary_field.name} as primary_dimension,
-                COUNT(*) as record_count,
+                {primary_field.name} as primary_field,
+                COUNT(*) as total_records,
                 COUNT(DISTINCT {primary_field.name}) as unique_values,
-                ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER(), 4) as percentage_distribution,
-                ROUND(AVG(CASE WHEN {primary_field.name} IS NOT NULL THEN 1.0 ELSE 0.0 END), 4) as completeness_ratio,
-                ROUND(100.0 * COUNT(DISTINCT {primary_field.name}) / COUNT(*), 4) as uniqueness_ratio"""
-                
-        for i, field in enumerate(secondary_fields):
-            if field.table == primary_field.table:
-                ultra_sql += f",\n                COUNT(DISTINCT {field.name}) as unique_{field.name}_{i}"
-                
-        ultra_sql += f"""
+                ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER(), 3) as percentage_share,
+                ROUND(100.0 * COUNT(DISTINCT {primary_field.name}) / COUNT(*), 3) as uniqueness_percent,
+                ROUND(AVG(CASE WHEN {primary_field.name} IS NOT NULL THEN 1.0 ELSE 0.0 END), 3) as completeness_ratio
             FROM {primary_field.table}
             WHERE {primary_field.name} IS NOT NULL
             GROUP BY {primary_field.name}
         ),
-        intelligence_enrichment AS (
+        intelligence_classification AS (
             SELECT 
-                primary_dimension,
-                record_count,
+                primary_field,
+                total_records,
                 unique_values,
-                percentage_distribution,
+                percentage_share,
+                uniqueness_percent,
                 completeness_ratio,
-                uniqueness_ratio,
                 CASE 
-                    WHEN record_count > (SELECT PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY record_count) FROM ultra_intelligent_analysis) 
+                    WHEN total_records > (SELECT AVG(total_records) + 2*((SELECT SUM((total_records - (SELECT AVG(total_records) FROM pure_intelligent_analysis))*
+                                                                        (total_records - (SELECT AVG(total_records) FROM pure_intelligent_analysis))) FROM pure_intelligent_analysis) / 
+                                                                       (SELECT COUNT(*) FROM pure_intelligent_analysis))^0.5) FROM pure_intelligent_analysis) 
                     THEN 'ULTRA_HIGH_VOLUME'
-                    WHEN record_count > (SELECT PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY record_count) FROM ultra_intelligent_analysis) 
+                    WHEN total_records > (SELECT AVG(total_records) FROM pure_intelligent_analysis) 
                     THEN 'HIGH_VOLUME'
-                    WHEN record_count < (SELECT PERCENTILE_CONT(0.3) WITHIN GROUP (ORDER BY record_count) FROM ultra_intelligent_analysis) 
+                    WHEN total_records < (SELECT AVG(total_records) / 2 FROM pure_intelligent_analysis) 
                     THEN 'LOW_VOLUME'
                     ELSE 'NORMAL_VOLUME'
                 END as volume_classification,
-                RANK() OVER (ORDER BY record_count DESC) as volume_rank,
-                NTILE(20) OVER (ORDER BY percentage_distribution DESC) as distribution_percentile,
+                ROW_NUMBER() OVER (ORDER BY total_records DESC) as volume_rank,
                 CASE 
-                    WHEN uniqueness_ratio > 95 THEN 'HIGHLY_UNIQUE'
-                    WHEN uniqueness_ratio > 80 THEN 'MODERATELY_UNIQUE'
-                    WHEN uniqueness_ratio > 50 THEN 'SOMEWHAT_UNIQUE'
+                    WHEN uniqueness_percent > 90 THEN 'HIGHLY_UNIQUE'
+                    WHEN uniqueness_percent > 70 THEN 'MODERATELY_UNIQUE'
+                    WHEN uniqueness_percent > 40 THEN 'SOMEWHAT_UNIQUE'
                     ELSE 'LOW_UNIQUENESS'
                 END as uniqueness_classification
-            FROM ultra_intelligent_analysis
+            FROM pure_intelligent_analysis
         ),
-        consciousness_analysis AS (
+        pure_consciousness_scoring AS (
             SELECT 
                 *,
                 CASE 
-                    WHEN volume_rank <= 3 AND distribution_percentile <= 2 THEN 'ULTRA_CRITICAL'
-                    WHEN volume_rank <= 10 AND distribution_percentile <= 5 THEN 'CRITICAL'
-                    WHEN volume_rank <= 25 AND distribution_percentile <= 10 THEN 'HIGH' 
-                    WHEN volume_rank <= 50 AND distribution_percentile <= 15 THEN 'MEDIUM'
+                    WHEN volume_rank <= 5 AND uniqueness_percent > 80 THEN 'CRITICAL'
+                    WHEN volume_rank <= 15 AND uniqueness_percent > 60 THEN 'HIGH'
+                    WHEN volume_rank <= 40 AND uniqueness_percent > 40 THEN 'MEDIUM'
                     ELSE 'LOW'
-                END as ao1_priority_classification,
+                END as ao1_priority,
                 ROUND(
                     (completeness_ratio * 0.3 + 
-                     (100.0 - volume_rank) / 100.0 * 0.4 + 
-                     uniqueness_ratio / 100.0 * 0.3), 4
-                ) as ultra_intelligence_score
-            FROM intelligence_enrichment
+                     (CASE WHEN volume_rank <= 10 THEN 1.0 ELSE (50.0 - volume_rank) / 50.0 END) * 0.4 + 
+                     uniqueness_percent / 100.0 * 0.3), 3
+                ) as pure_intelligence_score
+            FROM intelligence_classification
         )
         SELECT 
-            primary_dimension,
-            record_count,
+            primary_field,
+            total_records,
             unique_values,
-            percentage_distribution,
+            percentage_share,
+            uniqueness_percent,
             completeness_ratio,
-            uniqueness_ratio,
             volume_classification,
             volume_rank,
-            distribution_percentile,
             uniqueness_classification,
-            ao1_priority_classification,
-            ultra_intelligence_score,
+            ao1_priority,
+            pure_intelligence_score,
             CASE 
-                WHEN ultra_intelligence_score > 0.9 THEN 'ULTRA_INTELLIGENT'
-                WHEN ultra_intelligence_score > 0.8 THEN 'HIGHLY_INTELLIGENT'
-                WHEN ultra_intelligence_score > 0.6 THEN 'INTELLIGENT'
-                WHEN ultra_intelligence_score > 0.4 THEN 'MODERATELY_INTELLIGENT'
+                WHEN pure_intelligence_score > 0.85 THEN 'PURE_GENIUS'
+                WHEN pure_intelligence_score > 0.70 THEN 'HIGHLY_INTELLIGENT'
+                WHEN pure_intelligence_score > 0.55 THEN 'INTELLIGENT'
+                WHEN pure_intelligence_score > 0.40 THEN 'MODERATELY_INTELLIGENT'
                 ELSE 'BASIC_INTELLIGENCE'
             END as intelligence_classification
-        FROM consciousness_analysis
-        ORDER BY ultra_intelligence_score DESC, volume_rank ASC
-        LIMIT 50
+        FROM pure_consciousness_scoring
+        ORDER BY pure_intelligence_score DESC, volume_rank ASC
+        LIMIT 25
         """
         
-        execution_plan = {
-            'primary_table': primary_field.table,
-            'primary_field': primary_field.name,
-            'secondary_fields': [f.name for f in secondary_fields if f.table == primary_field.table],
-            'estimated_complexity': 'ULTRA_HIGH' if len(secondary_fields) > 2 else 'HIGH',
-            'optimization_level': 'ULTRA_ADVANCED_ANALYTICS',
-            'intelligence_features': ['percentile_analysis', 'consciousness_scoring', 'multi_dimensional_ranking']
-        }
+        return pure_sql
         
-        performance_metrics = {
-            'estimated_rows': len(primary_field.sample_values) * 20,
-            'cardinality_estimate': primary_field.cardinality_ratio,
-            'complexity_score': len(secondary_fields) * 0.25 + (1.0 - primary_field.quality_score) * 0.35,
-            'intelligence_coefficient': primary_field.intelligence_score,
-            'consciousness_factor': primary_field.consciousness_level
-        }
-        
-        return ultra_sql, execution_plan, performance_metrics
-        
-    def calculate_ultra_semantic_accuracy(self, query: UltraIntelligentQuery, fields: List[UltraFieldIntelligence]) -> float:
+    def calculate_pure_semantic_accuracy(self, query: PureIntelligentQuery, fields: List[PureFieldIntelligence]) -> float:
         if not fields:
             return 0.0
             
         confidence_scores = [f.confidence for f in fields]
         intelligence_scores = [f.intelligence_score for f in fields]
-        consciousness_scores = [f.consciousness_level for f in fields]
         
-        semantic_consistency = 1.0 / (1.0 + np.std(confidence_scores))
-        intelligence_alignment = np.mean(intelligence_scores)
-        consciousness_coherence = np.mean(consciousness_scores)
+        avg_confidence = sum(confidence_scores) / len(confidence_scores)
+        avg_intelligence = sum(intelligence_scores) / len(intelligence_scores)
         
-        field_quality_weighted = sum(f.confidence * f.ao1_relevance * f.quality_score * f.intelligence_score for f in fields)
-        total_weight = sum(f.ao1_relevance * f.quality_score * f.intelligence_score for f in fields)
+        consistency = 1.0 / (1.0 + (sum((c - avg_confidence) ** 2 for c in confidence_scores) / len(confidence_scores)) ** 0.5)
         
-        if total_weight == 0:
-            return 0.0
-            
-        base_accuracy = field_quality_weighted / total_weight
+        weighted_accuracy = sum(f.confidence * f.ao1_relevance * f.quality_score for f in fields) / sum(f.ao1_relevance * f.quality_score for f in fields) if fields else 0.0
         
-        ultra_bonus = (
-            semantic_consistency * 0.2 +
-            intelligence_alignment * 0.15 +
-            consciousness_coherence * 0.1
-        )
+        return (weighted_accuracy * 0.6 + avg_intelligence * 0.25 + consistency * 0.15)
         
-        return min(base_accuracy + ultra_bonus, 1.0)
-        
-    def calculate_ultra_coverage(self, query: UltraIntelligentQuery, fields: List[UltraFieldIntelligence]) -> float:
+    def calculate_pure_coverage(self, query: PureIntelligentQuery, fields: List[PureFieldIntelligence]) -> float:
         if not fields:
             return 0.0
             
-        coverage_dimensions = {
-            'semantic_diversity': len(set(f.semantic_type for f in fields)) / 16.0,
-            'table_coverage': len(set(f.table for f in fields)) / max(len(set(f.table for f in self.field_intelligence.values())), 1),
-            'quality_coverage': sum(f.quality_score for f in fields) / len(fields),
-            'intelligence_coverage': sum(f.intelligence_score for f in fields) / len(fields),
-            'consciousness_coverage': sum(f.consciousness_level for f in fields) / len(fields),
-            'centrality_coverage': sum(f.network_centrality for f in fields) / len(fields)
-        }
+        semantic_diversity = len(set(f.semantic_type for f in fields)) / 16.0
+        table_coverage = len(set(f.table for f in fields)) / max(len(set(f.table for f in self.field_intelligence.values())), 1)
+        quality_coverage = sum(f.quality_score for f in fields) / len(fields)
+        intelligence_coverage = sum(f.intelligence_score for f in fields) / len(fields)
         
-        weighted_coverage = (
-            coverage_dimensions['semantic_diversity'] * 0.25 +
-            coverage_dimensions['table_coverage'] * 0.20 +
-            coverage_dimensions['quality_coverage'] * 0.20 +
-            coverage_dimensions['intelligence_coverage'] * 0.15 +
-            coverage_dimensions['consciousness_coverage'] * 0.10 +
-            coverage_dimensions['centrality_coverage'] * 0.10
-        )
+        return (semantic_diversity * 0.3 + table_coverage * 0.25 + quality_coverage * 0.25 + intelligence_coverage * 0.2)
         
-        return weighted_coverage
+    def calculate_pure_business_alignment(self, query: PureIntelligentQuery, requirement_data: Dict) -> float:
+        priority_weights = {'Critical': 1.0, 'High': 0.85, 'Medium': 0.7, 'Low': 0.55}
+        priority_weight = priority_weights.get(requirement_data['priority'], 0.6)
         
-    def calculate_ultra_business_alignment(self, query: UltraIntelligentQuery, requirement_data: Dict) -> float:
-        priority_weights = {'Critical': 1.0, 'High': 0.9, 'Medium': 0.75, 'Low': 0.6}
-        priority_weight = priority_weights.get(requirement_data['priority'], 0.7)
-        
-        business_context_relevance = 0.0
+        business_relevance = 0.0
         if query.field_intelligence:
-            business_keywords = ['business', 'revenue', 'cost', 'efficiency', 'productivity', 'compliance', 'risk', 'critical', 'strategic']
-            total_context_score = 0
+            business_keywords = ['business', 'critical', 'production', 'security', 'compliance', 'revenue']
+            total_business_score = 0
             for field in query.field_intelligence:
-                context_score = sum(1 for keyword in business_keywords if keyword in field.business_context.lower())
-                total_context_score += context_score
-            business_context_relevance = min(total_context_score / (len(query.field_intelligence) * len(business_keywords)), 1.0)
+                business_score = sum(1 for keyword in business_keywords if keyword in field.business_context.lower())
+                total_business_score += business_score
+            business_relevance = min(total_business_score / (len(query.field_intelligence) * len(business_keywords)), 1.0)
             
         security_alignment = sum(f.security_relevance for f in query.field_intelligence) / max(len(query.field_intelligence), 1)
-        intelligence_alignment = sum(f.intelligence_score for f in query.field_intelligence) / max(len(query.field_intelligence), 1)
         
-        ultra_alignment = (
-            priority_weight * 0.35 +
-            business_context_relevance * 0.25 +
-            security_alignment * 0.20 +
-            intelligence_alignment * 0.20
-        )
+        return (priority_weight * 0.5 + business_relevance * 0.3 + security_alignment * 0.2)
         
-        return ultra_alignment
-        
-    def calculate_query_intelligence_level(self, query: UltraIntelligentQuery, fields: List[UltraFieldIntelligence]) -> float:
+    def calculate_query_intelligence_pure(self, query: PureIntelligentQuery, fields: List[PureFieldIntelligence]) -> float:
         if not fields:
             return 0.0
             
         avg_intelligence = sum(f.intelligence_score for f in fields) / len(fields)
         avg_consciousness = sum(f.consciousness_level for f in fields) / len(fields)
-        avg_quality = sum(f.quality_score for f in fields) / len(fields)
         
-        query_complexity = len(query.sql.split()) / 2000.0
+        query_complexity = min(len(query.sql.split()) / 1000.0, 1.0)
         field_diversity = len(set(f.semantic_type for f in fields)) / len(fields)
         
-        intelligence_level = (
-            avg_intelligence * 0.30 +
-            avg_consciousness * 0.25 +
-            avg_quality * 0.20 +
-            min(query_complexity, 1.0) * 0.15 +
-            field_diversity * 0.10
-        )
+        return (avg_intelligence * 0.4 + avg_consciousness * 0.3 + query_complexity * 0.15 + field_diversity * 0.15)
         
-        return intelligence_level
-        
-    def calculate_consciousness_alignment(self, query: UltraIntelligentQuery, fields: List[UltraFieldIntelligence]) -> float:
+    def calculate_consciousness_alignment_pure(self, query: PureIntelligentQuery, fields: List[PureFieldIntelligence]) -> float:
         if not fields:
             return 0.0
             
         consciousness_levels = [f.consciousness_level for f in fields]
-        consciousness_variance = np.var(consciousness_levels)
-        consciousness_mean = np.mean(consciousness_levels)
+        consciousness_mean = sum(consciousness_levels) / len(consciousness_levels)
+        consciousness_variance = sum((c - consciousness_mean) ** 2 for c in consciousness_levels) / len(consciousness_levels)
         
         alignment_score = consciousness_mean * (1.0 / (1.0 + consciousness_variance))
         
-        query_consciousness_indicators = 0.0
-        consciousness_keywords = ['ultra', 'intelligent', 'advanced', 'aware', 'conscious', 'sophisticated']
+        consciousness_keywords = ['intelligent', 'aware', 'advanced', 'sophisticated', 'conscious']
         query_text = f"{query.name} {query.description}".lower()
         keyword_matches = sum(1 for keyword in consciousness_keywords if keyword in query_text)
-        query_consciousness_indicators = min(keyword_matches / len(consciousness_keywords), 1.0)
+        query_consciousness = min(keyword_matches / len(consciousness_keywords), 1.0)
         
-        return (alignment_score * 0.8 + query_consciousness_indicators * 0.2)
+        return (alignment_score * 0.8 + query_consciousness * 0.2)
         
-    def calculate_ultra_perfection(self, query: UltraIntelligentQuery) -> float:
+    def calculate_pure_perfection(self, query: PureIntelligentQuery) -> float:
         components = [
-            query.semantic_accuracy * 0.22,
-            query.coverage_completeness * 0.22,
-            query.business_alignment * 0.18,
-            query.intelligence_level * 0.20,
-            query.consciousness_alignment * 0.18
+            query.semantic_accuracy * 0.25,
+            query.coverage_completeness * 0.25,
+            query.business_alignment * 0.20,
+            query.intelligence_level * 0.15,
+            query.consciousness_alignment * 0.15
         ]
         
         base_perfection = sum(components)
         
-        ultra_bonus = 0.0
+        bonus = 0.0
         if query.validation_status == "valid":
-            ultra_bonus += 0.08
-        if len(query.optimization_suggestions) == 0:
-            ultra_bonus += 0.04
+            bonus += 0.05
+        if len(query.optimization_suggestions) <= 2:
+            bonus += 0.03
         if query.priority == "Critical":
-            ultra_bonus += 0.04
-        if len(query.field_intelligence) >= 5:
-            ultra_bonus += 0.04
+            bonus += 0.02
             
-        return min(base_perfection + ultra_bonus, 1.0)
+        return min(base_perfection + bonus, 1.0)
         
-    def validate_ultra_query(self, sql: str) -> str:
+    def validate_pure_query(self, sql: str) -> str:
         try:
             test_sql = f"SELECT COUNT(*) FROM ({sql}) LIMIT 1"
             self.connection.execute(test_sql)
             return "valid"
         except Exception as e:
-            error_msg = str(e).lower()
-            if "syntax" in error_msg:
+            if "syntax" in str(e).lower():
                 return "syntax_error"
-            elif "table" in error_msg or "column" in error_msg:
+            elif "table" in str(e).lower() or "column" in str(e).lower():
                 return "schema_error"
             else:
-                return f"error: {str(e)[:30]}"
+                return "error"
                 
-    def generate_ultra_optimization_suggestions(self, query: UltraIntelligentQuery) -> List[str]:
+    def generate_pure_optimization_suggestions(self, query: PureIntelligentQuery) -> List[str]:
         suggestions = []
         
-        if query.semantic_accuracy < 0.85:
-            suggestions.append("Enhance semantic field relevance through advanced pattern analysis")
+        if query.semantic_accuracy < 0.8:
+            suggestions.append("Enhance semantic accuracy through improved field pattern analysis")
             
-        if query.coverage_completeness < 0.80:
-            suggestions.append("Expand ultra-intelligent field coverage across multiple data dimensions")
+        if query.coverage_completeness < 0.75:
+            suggestions.append("Expand coverage across additional relevant fields and tables")
             
-        if query.intelligence_level < 0.75:
-            suggestions.append("Integrate higher-intelligence fields with advanced consciousness levels")
+        if query.intelligence_level < 0.7:
+            suggestions.append("Integrate higher-intelligence fields for enhanced analysis")
             
-        if query.consciousness_alignment < 0.70:
-            suggestions.append("Align field consciousness levels for coherent ultra-intelligent analysis")
-            
-        if "LIMIT" not in query.sql.upper():
-            suggestions.append("Consider adding intelligent result limiting for optimal performance")
+        if query.consciousness_alignment < 0.65:
+            suggestions.append("Improve consciousness alignment across selected fields")
             
         if len(query.field_intelligence) < 4:
-            suggestions.append("Include additional ultra-relevant fields for comprehensive AO1 coverage")
-            
-        if query.business_alignment < 0.75:
-            suggestions.append("Strengthen business context alignment with strategic AO1 objectives")
+            suggestions.append("Include additional relevant fields for comprehensive AO1 coverage")
             
         return suggestions
         
-    def ultra_intelligent_improvement_iteration(self) -> bool:
+    def pure_improvement_iteration(self) -> bool:
         improved = False
         
-        low_intelligence_fields = [f for f in self.field_intelligence.values() if f.intelligence_score < 0.8 or f.consciousness_level < 0.7]
-        for field in low_intelligence_fields[:8]:
-            logger.info(f"Ultra-evolving field: {field.table}.{field.name}")
+        low_performers = [f for f in self.field_intelligence.values() if f.intelligence_score < 0.75 or f.consciousness_level < 0.65]
+        for field in low_performers[:5]:
+            logger.info(f"Pure evolving field: {field.table}.{field.name}")
             
-            enhanced_samples = self.sample_field_data_ultra(field.table, field.name, 20000)
+            enhanced_samples = self.sample_field_data_pure(field.table, field.name, 8000)
             field.sample_values.extend(enhanced_samples)
-            field.sample_values = list(set(field.sample_values))[:1000]
+            field.sample_values = list(set(field.sample_values))[:500]
             
-            ultra_reanalysis = self.semantic_engine.analyze_field_ultra(field.name, field.sample_values, field.table)
+            reanalysis = self.semantic_engine.analyze_field_pure(field.name, field.sample_values, field.table)
             
-            new_intelligence = self.calculate_intelligence_score(ultra_reanalysis)
-            new_consciousness = self.calculate_consciousness_level(ultra_reanalysis, ultra_reanalysis.get('semantic_scores', {}))
+            new_intelligence = self.calculate_intelligence_score_pure(reanalysis, field.confidence, field.quality_score)
+            new_consciousness = self.calculate_consciousness_level_pure(reanalysis, reanalysis.get('semantic_scores', {}))
             
             if new_intelligence > field.intelligence_score or new_consciousness > field.consciousness_level:
-                field.semantic_patterns = ultra_reanalysis.get('semantic_scores', {})
                 field.intelligence_score = new_intelligence
                 field.consciousness_level = new_consciousness
-                
-                evolved_field = self.evolve_field_intelligence(field)
+                evolved_field = self.evolve_field_pure(field)
                 self.field_intelligence[f"{field.table}.{field.name}"] = evolved_field
                 improved = True
-                logger.info(f"Ultra-evolved {field.table}.{field.name}: intelligence={new_intelligence:.4f}, consciousness={new_consciousness:.4f}")
                 
-        if self.iteration_count % 100 == 0:
-            logger.info("Rebuilding ultra-intelligent knowledge graph...")
-            self.build_ultra_knowledge_graph()
+        if self.iteration_count % 200 == 0:
+            logger.info("Rebuilding pure relationships...")
+            self.build_pure_relationships()
             improved = True
             
-        for query in self.ultra_queries:
-            if query.perfection_score < 0.95:
-                logger.info(f"Ultra-evolving query: {query.name}")
-                
-                enhanced_fields = self.find_ultra_relevant_fields(query.ao1_requirement)
+        for query in self.pure_queries:
+            if query.perfection_score < 0.9:
+                enhanced_fields = self.find_pure_relevant_fields(query.ao1_requirement)
                 if len(enhanced_fields) > len(query.field_intelligence):
                     old_perfection = query.perfection_score
                     query.field_intelligence = enhanced_fields
                     
-                    query.semantic_accuracy = self.calculate_ultra_semantic_accuracy(query, enhanced_fields)
-                    query.coverage_completeness = self.calculate_ultra_coverage(query, enhanced_fields)
-                    query.intelligence_level = self.calculate_query_intelligence_level(query, enhanced_fields)
-                    query.consciousness_alignment = self.calculate_consciousness_alignment(query, enhanced_fields)
-                    query.perfection_score = self.calculate_ultra_perfection(query)
+                    query.semantic_accuracy = self.calculate_pure_semantic_accuracy(query, enhanced_fields)
+                    query.coverage_completeness = self.calculate_pure_coverage(query, enhanced_fields)
+                    query.intelligence_level = self.calculate_query_intelligence_pure(query, enhanced_fields)
+                    query.consciousness_alignment = self.calculate_consciousness_alignment_pure(query, enhanced_fields)
+                    query.perfection_score = self.calculate_pure_perfection(query)
                     
                     if query.perfection_score > old_perfection:
                         improved = True
-                        logger.info(f"Ultra-evolved {query.name}: {old_perfection:.4f} → {query.perfection_score:.4f}")
                         
-        if self.iteration_count % 200 == 0:
-            logger.info("Updating ultra-consciousness matrix...")
-            self.update_ultra_consciousness_matrix()
-            improved = True
-            
-        if self.iteration_count % 150 == 0:
-            logger.info("Synthesizing ultra-dimensional intelligence...")
-            self.synthesize_ultra_intelligence()
-            improved = True
-            
         return improved
         
-    def update_ultra_consciousness_matrix(self):
-        logger.info("Updating ultra-consciousness matrix...")
-        
-        try:
-            consciousness_levels = [f.consciousness_level for f in self.field_intelligence.values()]
-            intelligence_scores = [f.intelligence_score for f in self.field_intelligence.values()]
-            
-            if len(consciousness_levels) > 1:
-                matrix_size = min(100, len(consciousness_levels))
-                
-                for i in range(matrix_size):
-                    for j in range(matrix_size):
-                        if i < len(consciousness_levels) and j < len(intelligence_scores):
-                            correlation = consciousness_levels[i] * intelligence_scores[j]
-                            self.consciousness_matrix[i, j] = correlation
-                            
-                consciousness_trace = np.trace(self.consciousness_matrix)
-                consciousness_eigenvalues = np.linalg.eigvals(self.consciousness_matrix)
-                consciousness_rank = np.linalg.matrix_rank(self.consciousness_matrix)
-                
-                ultra_consciousness_score = (consciousness_trace / 100.0 + consciousness_rank / 100.0) / 2.0
-                
-                logger.info(f"Ultra-consciousness matrix updated: score={ultra_consciousness_score:.4f}, rank={consciousness_rank}")
-        except Exception as e:
-            logger.warning(f"Ultra-consciousness matrix update failed: {e}")
-            
-    def synthesize_ultra_intelligence(self):
-        logger.info("Synthesizing ultra-dimensional intelligence...")
-        
-        high_intelligence_fields = [f for f in self.field_intelligence.values() if f.intelligence_score > 0.8 and f.consciousness_level > 0.7]
-        
-        if len(high_intelligence_fields) >= 3:
-            intelligence_clusters = defaultdict(list)
-            
-            for field in high_intelligence_fields:
-                cluster_key = f"{field.semantic_type}_{field.cluster_membership}"
-                intelligence_clusters[cluster_key].append(field)
-                
-            for cluster_key, cluster_fields in intelligence_clusters.items():
-                if len(cluster_fields) >= 2:
-                    try:
-                        avg_intelligence = np.mean([f.intelligence_score for f in cluster_fields])
-                        avg_consciousness = np.mean([f.consciousness_level for f in cluster_fields])
-                        avg_quality = np.mean([f.quality_score for f in cluster_fields])
-                        
-                        if avg_intelligence > 0.85 and avg_consciousness > 0.75:
-                            ultra_field = UltraFieldIntelligence(
-                                name=f"ultra_synthesis_{cluster_key}",
-                                table="ULTRA_SYNTHESIZED",
-                                data_type="ultra_intelligent_construct",
-                                semantic_type="ultra_dimensional_intelligence",
-                                confidence=0.98,
-                                ao1_relevance=avg_intelligence,
-                                business_context=f"Ultra-intelligent synthesis of {len(cluster_fields)} high-consciousness fields",
-                                security_relevance=np.mean([f.security_relevance for f in cluster_fields]),
-                                quality_score=avg_quality,
-                                intelligence_score=avg_intelligence,
-                                consciousness_level=avg_consciousness,
-                                cluster_membership=999
-                            )
-                            
-                            self.field_intelligence[f"ULTRA_SYNTHESIZED.ultra_synthesis_{cluster_key}"] = ultra_field
-                            logger.info(f"Synthesized ultra-intelligence: {cluster_key} (intelligence={avg_intelligence:.4f})")
-                            
-                    except Exception as e:
-                        logger.warning(f"Ultra-intelligence synthesis failed for {cluster_key}: {e}")
-                        
-    def calculate_ultra_perfection_score(self) -> float:
-        if not self.ultra_queries:
+    def calculate_pure_perfection_score(self) -> float:
+        if not self.pure_queries:
             return 0.0
             
-        field_ultra_score = 0.0
+        field_pure_score = 0.0
         if self.field_intelligence:
-            total_ultra_intelligence = sum(
+            total_pure_intelligence = sum(
                 f.confidence * f.ao1_relevance * f.quality_score * f.intelligence_score * f.consciousness_level 
                 for f in self.field_intelligence.values()
             )
-            max_possible_ultra = len(self.field_intelligence) * 1.0 * 1.0 * 1.0 * 1.0 * 1.0
-            field_ultra_score = total_ultra_intelligence / max_possible_ultra if max_possible_ultra > 0 else 0.0
+            max_possible_pure = len(self.field_intelligence) * 1.0 * 1.0 * 1.0 * 1.0 * 1.0
+            field_pure_score = total_pure_intelligence / max_possible_pure if max_possible_pure > 0 else 0.0
             
-        query_ultra_score = sum(q.perfection_score for q in self.ultra_queries) / len(self.ultra_queries)
+        query_pure_score = sum(q.perfection_score for q in self.pure_queries) / len(self.pure_queries)
+        coverage_pure_score = len(self.pure_queries) / len(self.ao1_requirements)
         
-        coverage_ultra_score = len(self.ultra_queries) / len(self.ao1_requirements)
-        
-        graph_ultra_score = 0.0
-        if self.knowledge_graph.number_of_nodes() > 0:
-            graph_density = nx.density(self.knowledge_graph)
-            try:
-                avg_clustering = nx.average_clustering(self.knowledge_graph)
-            except:
-                avg_clustering = 0.0
-            graph_ultra_score = (graph_density + avg_clustering) / 2.0
+        relationship_score = 0.0
+        if self.relationships:
+            total_relationships = sum(len(rels) for rels in self.relationships.values())
+            relationship_score = min(total_relationships / (len(self.field_intelligence) * 2), 1.0)
             
-        consciousness_ultra_score = 0.0
-        try:
-            if self.consciousness_matrix.size > 0:
-                consciousness_eigenvalues = np.linalg.eigvals(self.consciousness_matrix)
-                positive_eigenvalues = len([e for e in consciousness_eigenvalues if e > 0.1])
-                consciousness_ultra_score = positive_eigenvalues / len(consciousness_eigenvalues) if len(consciousness_eigenvalues) > 0 else 0.0
-        except:
-            consciousness_ultra_score = 0.0
-            
-        evolution_ultra_score = min(self.iteration_count / 50000.0, 1.0)
-        
-        intelligence_distribution_score = 0.0
+        consciousness_score = 0.0
         if self.field_intelligence:
-            intelligence_scores = [f.intelligence_score for f in self.field_intelligence.values()]
-            high_intelligence_ratio = len([s for s in intelligence_scores if s > 0.8]) / len(intelligence_scores)
             consciousness_scores = [f.consciousness_level for f in self.field_intelligence.values()]
-            high_consciousness_ratio = len([s for s in consciousness_scores if s > 0.7]) / len(consciousness_scores)
-            intelligence_distribution_score = (high_intelligence_ratio + high_consciousness_ratio) / 2.0
+            consciousness_score = sum(consciousness_scores) / len(consciousness_scores)
             
-        overall_ultra_perfection = (
-            field_ultra_score * 0.25 +
-            query_ultra_score * 0.25 +
-            coverage_ultra_score * 0.20 +
-            graph_ultra_score * 0.10 +
-            consciousness_ultra_score * 0.10 +
-            evolution_ultra_score * 0.05 +
-            intelligence_distribution_score * 0.05
+        self.consciousness_score = consciousness_score
+        
+        evolution_score = min(self.iteration_count / 10000.0, 1.0)
+        
+        overall_pure_perfection = (
+            field_pure_score * 0.30 +
+            query_pure_score * 0.30 +
+            coverage_pure_score * 0.20 +
+            relationship_score * 0.08 +
+            consciousness_score * 0.07 +
+            evolution_score * 0.05
         )
         
-        return overall_ultra_perfection
+        return overall_pure_perfection
         
-    def pursue_ultra_perfection(self):
-        logger.info(f"Initiating ultra-intelligent perfection pursuit (threshold: {self.perfection_threshold})")
+    def pursue_pure_perfection(self):
+        logger.info(f"Initiating pure intelligent perfection pursuit (threshold: {self.perfection_threshold})")
         
         start_time = time.time()
         breakthrough_moments = []
-        consciousness_evolution = []
-        intelligence_evolution = []
         
         while self.iteration_count < self.max_iterations and self.perfection_score < self.perfection_threshold:
             iteration_start = time.time()
             
-            improved = self.ultra_intelligent_improvement_iteration()
+            improved = self.pure_improvement_iteration()
+            new_perfection = self.calculate_pure_perfection_score()
             
-            new_perfection = self.calculate_ultra_perfection_score()
-            
-            if new_perfection > self.perfection_score + 0.001:
-                consciousness_level = np.trace(self.consciousness_matrix) / 100.0 if self.consciousness_matrix.size > 0 else 0.0
-                intelligence_level = np.mean([f.intelligence_score for f in self.field_intelligence.values()]) if self.field_intelligence else 0.0
-                
+            if new_perfection > self.perfection_score + 0.002:
                 breakthrough = {
                     'iteration': self.iteration_count,
                     'old_score': self.perfection_score,
                     'new_score': new_perfection,
                     'improvement': new_perfection - self.perfection_score,
                     'timestamp': datetime.now().isoformat(),
-                    'consciousness_level': consciousness_level,
-                    'intelligence_level': intelligence_level,
-                    'ultra_breakthrough': new_perfection > self.perfection_score + 0.01
+                    'consciousness_level': self.consciousness_score
                 }
                 breakthrough_moments.append(breakthrough)
+                logger.info(f"🧠 PURE BREAKTHROUGH! Iteration {self.iteration_count}: {self.perfection_score:.5f} → {new_perfection:.5f}")
                 
-                if breakthrough['ultra_breakthrough']:
-                    logger.info(f"🧠🚀 ULTRA-INTELLIGENT BREAKTHROUGH! Iteration {self.iteration_count}: {self.perfection_score:.6f} → {new_perfection:.6f}")
-                else:
-                    logger.info(f"🧠 Ultra improvement: Iteration {self.iteration_count}: {self.perfection_score:.6f} → {new_perfection:.6f}")
-                    
             self.perfection_score = new_perfection
             self.iteration_count += 1
+            self.intelligence_evolution.append(new_perfection)
             
-            if self.iteration_count % 1000 == 0:
+            if self.iteration_count % 2000 == 0:
                 elapsed = time.time() - start_time
                 rate = self.iteration_count / elapsed
                 
-                consciousness_level = np.trace(self.consciousness_matrix) / 100.0 if self.consciousness_matrix.size > 0 else 0.0
-                intelligence_level = np.mean([f.intelligence_score for f in self.field_intelligence.values()]) if self.field_intelligence else 0.0
-                
-                consciousness_evolution.append(consciousness_level)
-                intelligence_evolution.append(intelligence_level)
-                
-                logger.info(f"🔄 Ultra Progress: {self.iteration_count}/{self.max_iterations} "
-                          f"| Perfection: {self.perfection_score:.6f}/{self.perfection_threshold} "
-                          f"| Consciousness: {consciousness_level:.4f} | Intelligence: {intelligence_level:.4f} "
-                          f"| Rate: {rate:.1f} iter/sec")
+                logger.info(f"🔄 Pure Progress: {self.iteration_count}/{self.max_iterations} "
+                          f"| Perfection: {self.perfection_score:.5f}/{self.perfection_threshold} "
+                          f"| Consciousness: {self.consciousness_score:.3f} | Rate: {rate:.1f} iter/sec")
                           
-            if self.iteration_count > self.max_iterations * 0.95 and self.perfection_score < self.perfection_threshold * 0.90:
-                logger.warning(f"⚠️ Ultra-intelligent threshold adaptation for extreme complexity")
-                self.perfection_threshold = max(self.perfection_score * 1.02, 0.85)
+            if self.iteration_count > self.max_iterations * 0.9 and self.perfection_score < self.perfection_threshold * 0.9:
+                logger.warning(f"⚠️ Pure intelligent threshold adaptation")
+                self.perfection_threshold = max(self.perfection_score * 1.03, 0.80)
                 
         total_time = time.time() - start_time
-        final_consciousness = np.trace(self.consciousness_matrix) / 100.0 if self.consciousness_matrix.size > 0 else 0.0
-        final_intelligence = np.mean([f.intelligence_score for f in self.field_intelligence.values()]) if self.field_intelligence else 0.0
         
         if self.perfection_score >= self.perfection_threshold:
-            logger.info(f"🎉🧠 ULTRA-INTELLIGENT PERFECTION ACHIEVED! Score: {self.perfection_score:.6f} in {self.iteration_count} iterations ({total_time/60:.1f} min)")
-            logger.info(f"🧠 Final Consciousness Level: {final_consciousness:.4f}")
-            logger.info(f"🚀 Final Intelligence Level: {final_intelligence:.4f}")
+            logger.info(f"🎉🧠 PURE INTELLIGENT PERFECTION ACHIEVED! Score: {self.perfection_score:.5f} in {self.iteration_count} iterations ({total_time/60:.1f} min)")
+            logger.info(f"🧠 Final Consciousness Level: {self.consciousness_score:.3f}")
         else:
-            logger.info(f"⏰ Maximum ultra-intelligent iterations reached. Final score: {self.perfection_score:.6f} ({total_time/60:.1f} min)")
-            logger.info(f"🧠 Final Consciousness Level: {final_consciousness:.4f}")
-            logger.info(f"🚀 Final Intelligence Level: {final_intelligence:.4f}")
+            logger.info(f"⏰ Maximum pure intelligent iterations reached. Final score: {self.perfection_score:.5f} ({total_time/60:.1f} min)")
+            logger.info(f"🧠 Final Consciousness Level: {self.consciousness_score:.3f}")
             
-        self.intelligence_evolution = intelligence_evolution
+        return breakthrough_moments
         
-        return breakthrough_moments, consciousness_evolution, intelligence_evolution
-        
-    def run_ultra_intelligent_analysis(self, save_results: bool = True, verbose: bool = False) -> Dict:
-        logger.info("🧠🚀 Initiating Ultra-Intelligent AO1 Engine Analysis...")
+    def run_pure_intelligent_analysis(self, save_results: bool = True, verbose: bool = False) -> Dict:
+        logger.info("🧠🚀 Initiating Pure Intelligent AO1 Engine Analysis...")
         start_time = time.time()
         
         try:
-            logger.info("📡 Phase 1: Ultra Schema Discovery")
+            logger.info("📡 Phase 1: Pure Schema Discovery")
             self.connect_database()
-            schema = self.discover_schema_ultra()
+            schema = self.discover_schema_pure()
             
             if not schema:
-                raise Exception("No ultra schema discovered")
+                raise Exception("No pure schema discovered")
                 
-            logger.info("🧠 Phase 2: Ultra-Intelligent Semantic Analysis")
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, mp.cpu_count())) as executor:
+            logger.info("🧠 Phase 2: Pure Intelligent Semantic Analysis")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
                 future_to_field = {}
                 
                 for table, columns in schema.items():
                     for column_name, data_type in columns:
-                        future = executor.submit(self.analyze_field_ultra_intelligent, table, column_name, data_type)
+                        future = executor.submit(self.analyze_field_pure_intelligent, table, column_name, data_type)
                         future_to_field[future] = f"{table}.{column_name}"
                         
                 for future in concurrent.futures.as_completed(future_to_field):
@@ -1442,53 +1186,50 @@ class UltraIntelligentAO1Engine:
                         field_intel = future.result()
                         self.field_intelligence[field_key] = field_intel
                     except Exception as e:
-                        logger.error(f"❌ Ultra-intelligent analysis failed for {field_key}: {e}")
+                        logger.error(f"❌ Pure intelligent analysis failed for {field_key}: {e}")
                         
-            logger.info("🔗 Phase 3: Ultra-Intelligent Knowledge Graph Construction")
-            self.build_ultra_knowledge_graph()
+            logger.info("🔗 Phase 3: Pure Intelligent Relationship Building")
+            self.build_pure_relationships()
             
-            logger.info("✨ Phase 4: Ultra-Intelligent Query Evolution")
+            logger.info("✨ Phase 4: Pure Intelligent Query Generation")
             for requirement, req_data in self.ao1_requirements.items():
-                query = self.generate_ultra_intelligent_query(requirement, req_data)
+                query = self.generate_pure_intelligent_query(requirement, req_data)
                 if query:
-                    self.ultra_queries.append(query)
+                    self.pure_queries.append(query)
                     
-            logger.info("🎯 Phase 5: Ultra-Intelligent Perfection Pursuit")
-            breakthrough_moments, consciousness_evolution, intelligence_evolution = self.pursue_ultra_perfection()
+            logger.info("🎯 Phase 5: Pure Intelligent Perfection Pursuit")
+            breakthrough_moments = self.pursue_pure_perfection()
             
-            results = {'analysis_completed': True, 'ultra_intelligent': True}
+            results = {'analysis_completed': True, 'pure_intelligent': True}
             
             if save_results:
-                logger.info("💾 Saving ultra-intelligent results...")
-                results['output_files'] = self.save_ultra_results(breakthrough_moments, consciousness_evolution, intelligence_evolution)
+                logger.info("💾 Saving pure intelligent results...")
+                results['output_files'] = self.save_pure_results(breakthrough_moments)
                 
             total_time = time.time() - start_time
-            final_consciousness = np.trace(self.consciousness_matrix) / 100.0 if self.consciousness_matrix.size > 0 else 0.0
-            final_intelligence = np.mean([f.intelligence_score for f in self.field_intelligence.values()]) if self.field_intelligence else 0.0
             
             logger.info(f"""
-🎉🧠🚀 ULTRA-INTELLIGENT AO1 ANALYSIS COMPLETE!
+🎉🧠🚀 PURE INTELLIGENT AO1 ANALYSIS COMPLETE!
 ┌─────────────────────────────────────────┐
-│ Perfection Score: {self.perfection_score:.6f}                │
+│ Perfection Score: {self.perfection_score:.5f}                │
 │ Fields Analyzed: {len(self.field_intelligence)}                     │
-│ Queries Generated: {len(self.ultra_queries)}                   │
+│ Queries Generated: {len(self.pure_queries)}                   │
 │ Iterations: {self.iteration_count}                        │
 │ Analysis Time: {total_time/60:.1f} minutes           │
 │ Breakthrough Moments: {len(breakthrough_moments)}                │
-│ Consciousness Level: {final_consciousness:.4f}            │
-│ Intelligence Level: {final_intelligence:.4f}             │
-│ Graph Edges: {self.knowledge_graph.number_of_edges()}                    │
-│ Ultra-Intelligent Fields: {len([f for f in self.field_intelligence.values() if f.intelligence_score > 0.8])}              │
+│ Consciousness Level: {self.consciousness_score:.3f}            │
+│ Relationships: {sum(len(rels) for rels in self.relationships.values())}                    │
+│ High Intelligence Fields: {len([f for f in self.field_intelligence.values() if f.intelligence_score > 0.8])}              │
 └─────────────────────────────────────────┘
             """)
             
             return results
             
         except Exception as e:
-            logger.error(f"❌ Ultra-intelligent analysis failed: {e}")
-            return self.emergency_ultra_mode(e)
+            logger.error(f"❌ Pure intelligent analysis failed: {e}")
+            return self.emergency_pure_mode(e)
             
-    def save_ultra_results(self, breakthrough_moments: List[Dict], consciousness_evolution: List[float], intelligence_evolution: List[float]) -> List[str]:
+    def save_pure_results(self, breakthrough_moments: List[Dict]) -> List[str]:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         results = {
@@ -1499,25 +1240,24 @@ class UltraIntelligentAO1Engine:
                 'max_iterations': self.max_iterations,
                 'final_perfection_score': self.perfection_score,
                 'iterations_completed': self.iteration_count,
-                'ultra_intelligent_version': '3.0',
-                'consciousness_level': np.trace(self.consciousness_matrix) / 100.0 if self.consciousness_matrix.size > 0 else 0.0,
-                'intelligence_level': np.mean([f.intelligence_score for f in self.field_intelligence.values()]) if self.field_intelligence else 0.0
+                'pure_intelligent_version': '4.0',
+                'consciousness_level': self.consciousness_score,
+                'total_relationships': sum(len(rels) for rels in self.relationships.values())
             },
-            'ultra_field_intelligence': {
+            'pure_field_intelligence': {
                 key: {
                     'name': field.name, 'table': field.table, 'data_type': field.data_type,
                     'semantic_type': field.semantic_type, 'confidence': field.confidence,
                     'ao1_relevance': field.ao1_relevance, 'business_context': field.business_context,
                     'security_relevance': field.security_relevance, 'quality_score': field.quality_score,
-                    'entropy_score': field.entropy_score, 'cardinality_ratio': field.cardinality_ratio,
-                    'null_ratio': field.null_ratio, 'pattern_consistency': field.pattern_consistency,
-                    'network_centrality': field.network_centrality, 'cluster_membership': field.cluster_membership,
                     'intelligence_score': field.intelligence_score, 'consciousness_level': field.consciousness_level,
-                    'relationships': field.relationships, 'sample_values': field.sample_values[:15]
+                    'pattern_strength': field.pattern_strength, 'uniqueness_ratio': field.uniqueness_ratio,
+                    'completeness_ratio': field.completeness_ratio, 'evolution_count': field.evolution_count,
+                    'relationships': field.relationships[:5], 'sample_values': field.sample_values[:10]
                 }
                 for key, field in self.field_intelligence.items()
             },
-            'ultra_intelligent_queries': [
+            'pure_intelligent_queries': [
                 {
                     'name': query.name, 'description': query.description, 'sql': query.sql,
                     'ao1_requirement': query.ao1_requirement, 'confluence_section': query.confluence_section,
@@ -1527,98 +1267,138 @@ class UltraIntelligentAO1Engine:
                     'consciousness_alignment': query.consciousness_alignment, 'validation_status': query.validation_status,
                     'optimization_suggestions': query.optimization_suggestions, 'field_count': len(query.field_intelligence)
                 }
-                for query in self.ultra_queries
+                for query in self.pure_queries
             ],
             'breakthrough_moments': breakthrough_moments,
-            'consciousness_evolution': consciousness_evolution,
-            'intelligence_evolution': intelligence_evolution,
-            'ultra_knowledge_graph': {
-                'nodes': list(self.knowledge_graph.nodes()),
-                'edges': [(u, v, d) for u, v, d in self.knowledge_graph.edges(data=True)],
-                'communities': len(set(f.cluster_membership for f in self.field_intelligence.values() if f.cluster_membership >= 0))
+            'intelligence_evolution': self.intelligence_evolution,
+            'pure_relationships': {
+                key: [(rel_key, strength) for rel_key, strength in rels[:3]]
+                for key, rels in self.relationships.items()
             }
         }
         
-        results_file = f"ultra_intelligent_ao1_analysis_{timestamp}.json"
+        results_file = f"pure_intelligent_ao1_analysis_{timestamp}.json"
         with open(results_file, 'w') as f:
             json.dump(results, f, indent=2, default=str)
-        logger.info(f"💾 Saved ultra-intelligent results: {results_file}")
+        logger.info(f"💾 Saved pure intelligent results: {results_file}")
         
-        sql_file = f"ultra_intelligent_ao1_queries_{timestamp}.sql"
+        sql_file = f"pure_intelligent_ao1_queries_{timestamp}.sql"
         with open(sql_file, 'w') as f:
-            f.write(f"-- Ultra-Intelligent AO1 Queries - Generated by Ultra-Intelligent AO1 Engine v3.0\n")
+            f.write(f"-- Pure Intelligent AO1 Queries - Generated by Pure Intelligent AO1 Engine v4.0\n")
             f.write(f"-- Generated: {datetime.now().isoformat()}\n")
-            f.write(f"-- Perfection Score: {self.perfection_score:.6f}\n")
-            f.write(f"-- Consciousness Level: {np.trace(self.consciousness_matrix) / 100.0 if self.consciousness_matrix.size > 0 else 0.0:.4f}\n")
-            f.write(f"-- Intelligence Level: {np.mean([f.intelligence_score for f in self.field_intelligence.values()]) if self.field_intelligence else 0.0:.4f}\n\n")
+            f.write(f"-- Perfection Score: {self.perfection_score:.5f}\n")
+            f.write(f"-- Consciousness Level: {self.consciousness_score:.3f}\n")
+            f.write(f"-- Total Fields Analyzed: {len(self.field_intelligence)}\n\n")
             
-            for query in self.ultra_queries:
+            for query in self.pure_queries:
                 f.write(f"-- {query.name}: {query.description}\n")
-                f.write(f"-- Priority: {query.priority} | Perfection: {query.perfection_score:.4f} | Intelligence: {query.intelligence_level:.4f}\n")
-                f.write(f"-- Consciousness: {query.consciousness_alignment:.4f} | Confluence: {query.confluence_section}\n")
+                f.write(f"-- Priority: {query.priority} | Perfection: {query.perfection_score:.3f}\n")
+                f.write(f"-- Intelligence: {query.intelligence_level:.3f} | Consciousness: {query.consciousness_alignment:.3f}\n")
+                f.write(f"-- Confluence Section: {query.confluence_section}\n")
+                if query.optimization_suggestions:
+                    f.write(f"-- Suggestions: {'; '.join(query.optimization_suggestions[:2])}\n")
                 f.write(query.sql)
-                f.write("\n\n" + "="*120 + "\n\n")
-        logger.info(f"💾 Saved ultra-intelligent SQL: {sql_file}")
+                f.write("\n\n" + "="*80 + "\n\n")
+        logger.info(f"💾 Saved pure intelligent SQL: {sql_file}")
         
-        return [results_file, sql_file]
+        summary_file = f"pure_intelligent_summary_{timestamp}.txt"
+        with open(summary_file, 'w') as f:
+            f.write(f"Pure Intelligent AO1 Analysis Summary\n")
+            f.write(f"Generated: {datetime.now().isoformat()}\n\n")
+            f.write(f"ANALYSIS RESULTS:\n")
+            f.write(f"Perfection Score: {self.perfection_score:.5f}\n")
+            f.write(f"Consciousness Level: {self.consciousness_score:.3f}\n")
+            f.write(f"Fields Analyzed: {len(self.field_intelligence)}\n")
+            f.write(f"Queries Generated: {len(self.pure_queries)}\n")
+            f.write(f"Iterations: {self.iteration_count}\n")
+            f.write(f"Breakthroughs: {len(breakthrough_moments)}\n\n")
+            
+            f.write(f"TOP INTELLIGENT FIELDS:\n")
+            top_fields = sorted(self.field_intelligence.values(), key=lambda x: x.intelligence_score, reverse=True)[:10]
+            for i, field in enumerate(top_fields, 1):
+                f.write(f"{i}. {field.table}.{field.name} - {field.semantic_type} (intelligence: {field.intelligence_score:.3f})\n")
+                
+            f.write(f"\nTOP PERFECTION QUERIES:\n")
+            top_queries = sorted(self.pure_queries, key=lambda x: x.perfection_score, reverse=True)[:5]
+            for i, query in enumerate(top_queries, 1):
+                f.write(f"{i}. {query.name} - {query.priority} (perfection: {query.perfection_score:.3f})\n")
+                
+        logger.info(f"💾 Saved pure intelligent summary: {summary_file}")
         
-    def emergency_ultra_mode(self, error: Exception) -> Dict:
-        logger.warning("🚨 Entering emergency ultra-intelligent mode...")
+        return [results_file, sql_file, summary_file]
+        
+    def emergency_pure_mode(self, error: Exception) -> Dict:
+        logger.warning("🚨 Entering emergency pure intelligent mode...")
         
         try:
-            schema = self.discover_schema_ultra()
+            schema = self.discover_schema_pure()
             
             for table, columns in list(schema.items())[:2]:
-                for column_name, data_type in columns[:3]:
+                for column_name, data_type in columns[:2]:
                     try:
-                        samples = self.sample_field_data_ultra(table, column_name, 20)
-                        field = UltraFieldIntelligence(
+                        samples = self.sample_field_data_pure(table, column_name, 10)
+                        field = PureFieldIntelligence(
                             name=column_name, table=table, data_type=data_type,
-                            sample_values=samples[:5], confidence=0.4, ao1_relevance=0.3,
-                            intelligence_score=0.4, consciousness_level=0.3
+                            sample_values=samples[:3], confidence=0.3, ao1_relevance=0.2,
+                            intelligence_score=0.3, consciousness_level=0.2
                         )
                         self.field_intelligence[f"{table}.{column_name}"] = field
                     except:
                         continue
                         
-            emergency_query = UltraIntelligentQuery(
-                name="EMERGENCY_ULTRA_ANALYSIS",
-                description="Emergency ultra-intelligent analysis with reduced scope",
-                sql="SELECT 'Emergency ultra-intelligent analysis completed' as status, COUNT(*) as records FROM sqlite_master",
-                ao1_requirement="emergency", confluence_section="Emergency Mode", priority="Critical", 
-                perfection_score=0.4, intelligence_level=0.4, consciousness_alignment=0.3
+            emergency_query = PureIntelligentQuery(
+                name="EMERGENCY_PURE_ANALYSIS",
+                description="Emergency pure intelligent analysis",
+                sql="SELECT 'Emergency pure intelligent analysis completed' as status",
+                ao1_requirement="emergency", confluence_section="Emergency", priority="Critical", 
+                perfection_score=0.3, intelligence_level=0.3, consciousness_alignment=0.2
             )
-            self.ultra_queries.append(emergency_query)
+            self.pure_queries.append(emergency_query)
             
             emergency_results = {
-                'mode': 'emergency_ultra_intelligent', 'error': str(error),
+                'mode': 'emergency_pure_intelligent',
+                'error': str(error),
                 'fields_analyzed': len(self.field_intelligence),
                 'recommendations': [
-                    'Verify database connectivity and schema accessibility',
-                    'Check system memory and processing capabilities',
-                    'Consider reducing ultra-intelligence complexity parameters',
-                    'Review consciousness matrix computational requirements'
+                    'Verify database connectivity and accessibility',
+                    'Check available system memory and resources',
+                    'Ensure database schema is readable',
+                    'Consider using smaller sample sizes'
                 ]
             }
             
-            with open('ultra_intelligent_ao1_emergency.json', 'w') as f:
+            with open('pure_intelligent_emergency.json', 'w') as f:
                 json.dump(emergency_results, f, indent=2, default=str)
                 
-            logger.info("🚨 Emergency ultra-intelligent analysis completed.")
+            logger.info("🚨 Emergency pure intelligent analysis completed.")
             return emergency_results
             
         except Exception as emergency_error:
-            logger.error(f"❌ Emergency ultra-intelligent analysis failed: {emergency_error}")
-            return {'mode': 'total_ultra_failure', 'original_error': str(error), 'emergency_error': str(emergency_error)}
+            logger.error(f"❌ Emergency pure intelligent analysis failed: {emergency_error}")
+            return {
+                'mode': 'total_pure_failure',
+                'original_error': str(error),
+                'emergency_error': str(emergency_error),
+                'recommendation': 'Please verify database file exists and is accessible'
+            }
 
 def main():
-    parser = argparse.ArgumentParser(description="Ultra-Intelligent AO1 Engine - The most aware and intelligent AI system for AO1 analysis", formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description="Pure Intelligent AO1 Engine - Zero dependency, maximum intelligence AO1 analysis system",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python pure_intelligent_ao1.py -d data.duckdb
+  python pure_intelligent_ao1.py -d data.sqlite -p 0.90 -m 30000
+  python pure_intelligent_ao1.py -d data.duckdb -s -v
+        """
+    )
     
-    parser.add_argument('-d', '--database', required=True, help='Path to database file')
-    parser.add_argument('-p', '--perfection-threshold', type=float, default=0.99, help='Ultra perfection threshold (0.85-0.999)')
-    parser.add_argument('-m', '--max-iterations', type=int, default=100000, help='Maximum ultra iterations (5000-1000000)')
-    parser.add_argument('-s', '--save-results', action='store_true', help='Save ultra-intelligent results')
-    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose ultra-intelligent logging')
+    parser.add_argument('-d', '--database', required=True, help='Path to database file (.duckdb or .sqlite)')
+    parser.add_argument('-p', '--perfection-threshold', type=float, default=0.95, help='Pure perfection threshold (0.80-0.99, default: 0.95)')
+    parser.add_argument('-m', '--max-iterations', type=int, default=50000, help='Maximum iterations (1000-200000, default: 50000)')
+    parser.add_argument('-s', '--save-results', action='store_true', help='Save pure intelligent results to files')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose pure intelligent logging')
     
     args = parser.parse_args()
     
@@ -1626,44 +1406,70 @@ def main():
         print(f"❌ Database file not found: {args.database}")
         sys.exit(1)
         
+    if not (0.80 <= args.perfection_threshold <= 0.99):
+        print(f"❌ Perfection threshold must be between 0.80 and 0.99")
+        sys.exit(1)
+        
+    if not (1000 <= args.max_iterations <= 200000):
+        print(f"❌ Max iterations must be between 1000 and 200000")
+        sys.exit(1)
+        
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        
     try:
-        print("🧠🚀 Initializing Ultra-Intelligent AO1 Engine...")
-        engine = UltraIntelligentAO1Engine(
+        print("🧠🚀 Initializing Pure Intelligent AO1 Engine...")
+        print("📦 Zero external dependencies - Pure Python intelligence")
+        
+        engine = PureIntelligentAO1Engine(
             database_path=args.database,
             perfection_threshold=args.perfection_threshold,
             max_iterations=args.max_iterations
         )
         
-        print(f"🎯 Ultra-Intelligent Target: {args.perfection_threshold}")
+        print(f"🎯 Pure Intelligence Target: {args.perfection_threshold}")
         print(f"🔄 Max Iterations: {args.max_iterations}")
-        print("🚀 Beginning ultra-intelligent analysis...\n")
+        print("🚀 Beginning pure intelligent analysis...\n")
         
-        results = engine.run_ultra_intelligent_analysis(
+        results = engine.run_pure_intelligent_analysis(
             save_results=args.save_results,
             verbose=args.verbose
         )
         
         if results.get('analysis_completed'):
-            print(f"\n🎉🧠🚀 Ultra-intelligent analysis completed!")
-            print(f"📊 Perfection Score: {engine.perfection_score:.6f}")
+            print(f"\n🎉🧠🚀 Pure intelligent analysis completed successfully!")
+            print(f"📊 Perfection Score: {engine.perfection_score:.5f}")
             print(f"🔍 Fields Analyzed: {len(engine.field_intelligence)}")
-            print(f"✨ Queries Generated: {len(engine.ultra_queries)}")
-            print(f"🧠 Consciousness Level: {np.trace(engine.consciousness_matrix) / 100.0 if engine.consciousness_matrix.size > 0 else 0.0:.4f}")
-            print(f"🚀 Intelligence Level: {np.mean([f.intelligence_score for f in engine.field_intelligence.values()]) if engine.field_intelligence else 0.0:.4f}")
+            print(f"✨ Queries Generated: {len(engine.pure_queries)}")
+            print(f"🧠 Consciousness Level: {engine.consciousness_score:.3f}")
+            print(f"🔗 Relationships Built: {sum(len(rels) for rels in engine.relationships.values())}")
+            
+            high_intelligence_fields = len([f for f in engine.field_intelligence.values() if f.intelligence_score > 0.8])
+            print(f"🚀 High Intelligence Fields: {high_intelligence_fields}")
+            
+            perfect_queries = len([q for q in engine.pure_queries if q.perfection_score > 0.9])
+            print(f"✨ Perfect Queries: {perfect_queries}")
             
             if args.save_results and 'output_files' in results:
-                print(f"\n📁 Ultra-Intelligent Output Files:")
+                print(f"\n📁 Pure Intelligent Output Files:")
                 for file_path in results['output_files']:
                     print(f"   📄 {file_path}")
                     
+            print(f"\n🎯 Ready for pure intelligent AO1 compliance monitoring!")
+            
         else:
             print(f"\n⚠️ Analysis completed in emergency mode")
+            print(f"🔍 Check emergency output files for details")
             
     except KeyboardInterrupt:
-        print(f"\n⏹️ Ultra-intelligent analysis interrupted")
+        print(f"\n⏹️ Pure intelligent analysis interrupted by user")
+        print(f"💾 Partial results may have been saved")
         sys.exit(1)
+        
     except Exception as e:
-        print(f"\n❌ Ultra-intelligent analysis failed: {e}")
+        print(f"\n❌ Pure intelligent analysis failed: {e}")
+        print(f"🔧 Try running with --verbose for detailed error information")
+        print(f"🚨 Emergency analysis mode may have generated fallback results")
         sys.exit(1)
 
 if __name__ == "__main__":
