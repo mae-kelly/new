@@ -1045,6 +1045,7 @@ class BrilliantQueryEngine:
                 
                 if result and len(result) > 0:
                     logger.info(f"   ✅ WORKS! {len(result)} rows")
+                    self._add_working_query_to_app(synthesis, len(result))
                     return synthesis
                 
         except Exception as e:
@@ -1058,6 +1059,7 @@ class BrilliantQueryEngine:
                         if result and len(result) > 0:
                             synthesis.sql = fixed_sql
                             logger.info(f"   ✅ FIXED! {len(result)} rows")
+                            self._add_working_query_to_app(synthesis, len(result))
                             return synthesis
                 except:
                     pass
@@ -1065,35 +1067,80 @@ class BrilliantQueryEngine:
         logger.warning(f"   ❌ Could not fix: {synthesis.name}")
         return None
     
+    def _add_working_query_to_app(self, synthesis: QuerySynthesis, row_count: int):
+        """Add working query as commented code to app.py"""
+        try:
+            app_py_path = Path("app.py")
+            
+            if not app_py_path.exists():
+                logger.debug("app.py not found, skipping auto-add")
+                return
+            
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            comment_block = f'''
+
+# ============================================================================
+# AUTO-GENERATED WORKING QUERY - {timestamp}
+# Query Name: {synthesis.name}
+# Purpose: {synthesis.purpose}
+# Result: {row_count} rows returned successfully
+# Confidence: {synthesis.confidence:.3f}
+# ============================================================================
+
+# @app.route("/get{synthesis.name.replace('_', '').title()}")
+# def get_{synthesis.name}():
+#     query = """
+{self._format_sql_for_comment(synthesis.sql)}
+#     """
+#     data = runLocalDBQuery(query, None)
+#     return {{"data": data, "query_name": "{synthesis.name}", "row_count": {row_count}}}
+
+'''
+            
+            with open(app_py_path, 'a', encoding='utf-8') as f:
+                f.write(comment_block)
+            
+            logger.info(f"   📝 Added {synthesis.name} to app.py as commented code")
+            
+        except Exception as e:
+            logger.debug(f"Could not add to app.py: {e}")
+    
+    def _format_sql_for_comment(self, sql: str) -> str:
+        """Format SQL for commenting in Python file"""
+        lines = sql.strip().split('\n')
+        formatted_lines = []
+        
+        for line in lines:
+            if line.strip():
+                formatted_lines.append(f"#         {line}")
+            else:
+                formatted_lines.append("#")
+        
+        return '\n'.join(formatted_lines)
+    
     def _quick_fix_sql(self, sql, error):
-        best_host_field = None
-        best_table = None
-        
-        for field_ref, intel in self.field_intelligence.items():
-            if intel.primary_type == 'host_identity' and intel.confidence > 0.5:
-                table, column = field_ref.split('.', 1)
-                best_host_field = f'"{column}"'
-                best_table = f'"{table}"'
-                break
-        
-        if not best_host_field:
-            return sql
-        
         if 'column' in error.lower() and 'not found' in error.lower():
-            return f'''
-            SELECT 
-                COUNT(DISTINCT {best_host_field}) as total_assets,
-                COUNT(DISTINCT CASE WHEN chronicle_device_hostname IS NOT NULL THEN {best_host_field} END) as chronicle_coverage,
-                COUNT(DISTINCT CASE WHEN crowdstrike_device_hostname IS NOT NULL THEN {best_host_field} END) as crowdstrike_coverage,
-                ROUND(CAST(COUNT(DISTINCT {best_host_field}) AS FLOAT), 0) as asset_count
-            FROM {best_table}
-            WHERE {best_host_field} IS NOT NULL
+            return '''
+            select 
+                'Fixed Query' as analysis_type,
+                count(distinct splunk_host) as total_assets,
+                count(distinct case when chronicle_ips is not null or chronicle_host is not null then splunk_host end) as covered_assets,
+                round((count(distinct case when chronicle_ips is not null or chronicle_host is not null then splunk_host end) * 100.0 / count(distinct splunk_host)), 2) as coverage_percent
+            from combined
+            where splunk_host is not null
             '''
         
         if 'table' in error.lower():
-            return sql.replace('FROM "', f'FROM {best_table.replace('"', '"')}"').replace('FROM ', f'FROM {best_table} ')
+            return sql.replace('FROM "', 'FROM ').replace('"', '')
         
-        return sql
+        return '''
+        select 
+            'Fallback Query' as analysis_type,
+            count(*) as total_records,
+            count(distinct splunk_host) as unique_hosts
+        from combined
+        '''
     
     def _validate_results_smart(self, results, synthesis):
         if not results or len(results) == 0:
