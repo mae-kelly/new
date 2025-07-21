@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  ao1-scanner:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_PATH=/app/data/scanner.duckdb
+      - ENVIRONMENT=production
+      - LOG_LEVEL=info
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
