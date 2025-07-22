@@ -1,13 +1,8 @@
--- APPROACH 1: Complete automated solution with dynamic sampling
--- BigQuery script to get all tables, columns, and sample data
--- This uses INFORMATION_SCHEMA to discover tables and columns, then dynamically samples data
+-- APPROACH 1A: Batch processing solution to avoid size limits
+-- Processes tables in smaller batches to avoid the 1MB script variable limit
 
-DECLARE sql_statements ARRAY<STRING>;
-DECLARE i INT64 DEFAULT 0;
-DECLARE statement STRING;
-
--- Create a temporary table to store our results
-CREATE OR REPLACE TABLE `your_project.your_dataset.table_column_samples` (
+-- Create a permanent table to store results
+CREATE OR REPLACE TABLE `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.table_column_samples` (
   project_id STRING,
   dataset_id STRING,
   table_name STRING,
@@ -16,58 +11,72 @@ CREATE OR REPLACE TABLE `your_project.your_dataset.table_column_samples` (
   sample_values ARRAY<STRING>
 );
 
--- Get all tables and columns from INFORMATION_SCHEMA
-CREATE OR REPLACE TEMP TABLE table_columns AS
-SELECT 
+-- Get unique tables first
+CREATE OR REPLACE TEMP TABLE unique_tables AS
+SELECT DISTINCT
   table_catalog as project_id,
   table_schema as dataset_id,
   table_name,
-  column_name,
-  data_type,
-  CONCAT(
-    'INSERT INTO `your_project.your_dataset.table_column_samples` ',
-    'SELECT "', table_catalog, '" as project_id, ',
-    '"', table_schema, '" as dataset_id, ',
-    '"', table_name, '" as table_name, ',
-    '"', column_name, '" as column_name, ',
-    '"', data_type, '" as data_type, ',
-    'ARRAY_AGG(CAST(', column_name, ' AS STRING) IGNORE NULLS LIMIT 5) as sample_values ',
-    'FROM `', table_catalog, '.', table_schema, '.', table_name, '` ',
-    'WHERE ', column_name, ' IS NOT NULL ',
-    'HAVING COUNT(*) > 0'
-  ) as sql_statement
-FROM 
-  `your_project.your_dataset.INFORMATION_SCHEMA.COLUMNS`
-WHERE 
-  table_schema NOT IN ('INFORMATION_SCHEMA', 'information_schema')
-ORDER BY 
-  table_catalog, table_schema, table_name, ordinal_position;
+  ROW_NUMBER() OVER (ORDER BY table_catalog, table_schema, table_name) as table_num
+FROM `prj-fisv-p-gcss-sas-d19dd0f1df.INFORMATION_SCHEMA.COLUMNS`
+WHERE table_schema NOT IN ('INFORMATION_SCHEMA', 'information_schema');
 
--- Convert the SQL statements to an array
-SET sql_statements = (
-  SELECT ARRAY_AGG(sql_statement) 
-  FROM table_columns
-);
+-- Process tables in batches (adjust batch_size as needed)
+DECLARE batch_size INT64 DEFAULT 10;
+DECLARE max_table_num INT64;
+DECLARE current_batch_start INT64 DEFAULT 1;
+DECLARE current_batch_end INT64;
 
--- Execute each statement dynamically
-WHILE i < ARRAY_LENGTH(sql_statements) DO
-  SET statement = sql_statements[OFFSET(i)];
-  EXECUTE IMMEDIATE statement;
-  SET i = i + 1;
+SET max_table_num = (SELECT MAX(table_num) FROM unique_tables);
+
+-- Loop through batches
+WHILE current_batch_start <= max_table_num DO
+  SET current_batch_end = LEAST(current_batch_start + batch_size - 1, max_table_num);
+  
+  -- Process current batch of tables
+  FOR record IN (
+    SELECT DISTINCT project_id, dataset_id, table_name
+    FROM unique_tables 
+    WHERE table_num BETWEEN current_batch_start AND current_batch_end
+  ) DO
+    -- Process each table in the current batch
+    FOR col_record IN (
+      EXECUTE IMMEDIATE FORMAT("""
+        SELECT column_name, data_type
+        FROM `%s.INFORMATION_SCHEMA.COLUMNS`
+        WHERE table_catalog = '%s' 
+          AND table_schema = '%s' 
+          AND table_name = '%s'
+        ORDER BY ordinal_position
+      """, record.project_id, record.project_id, record.dataset_id, record.table_name)
+    ) DO
+      -- Sample data for each column
+      EXECUTE IMMEDIATE FORMAT("""
+        INSERT INTO `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.table_column_samples`
+        SELECT 
+          '%s' as project_id,
+          '%s' as dataset_id,
+          '%s' as table_name,
+          '%s' as column_name,
+          '%s' as data_type,
+          ARRAY_AGG(CAST(%s AS STRING) IGNORE NULLS LIMIT 5) as sample_values
+        FROM `%s.%s.%s`
+        WHERE %s IS NOT NULL
+        HAVING COUNT(*) > 0
+      """, 
+      record.project_id, record.dataset_id, record.table_name, 
+      col_record.column_name, col_record.data_type, col_record.column_name,
+      record.project_id, record.dataset_id, record.table_name, 
+      col_record.column_name);
+    END FOR;
+  END FOR;
+  
+  SET current_batch_start = current_batch_end + 1;
 END WHILE;
 
--- Final result: Show all tables, columns, and their sample values
-SELECT 
-  project_id,
-  dataset_id,
-  table_name,
-  column_name,
-  data_type,
-  sample_values
-FROM 
-  `your_project.your_dataset.table_column_samples`
-ORDER BY 
-  project_id, dataset_id, table_name, column_name;
+-- Final result
+SELECT * FROM `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.table_column_samples`
+ORDER BY project_id, dataset_id, table_name, column_name;
 
 -- =============================================================================
 -- APPROACH 2: Schema discovery with generated sampling queries
