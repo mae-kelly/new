@@ -1,14 +1,41 @@
--- OPTIMIZED MULTI-PROJECT TABLE COLUMN SAMPLER
--- This script efficiently samples all tables and columns across ALL projects you have access to
--- Performance optimizations: batching, parallel execution, streaming inserts, and error handling
+-- OPTIMIZED ALL-DATASETS TABLE COLUMN SAMPLER
+-- ============================================================================
+-- CONFIGURATION SECTION - UPDATE THIS VALUE BEFORE RUNNING
+-- ============================================================================
+-- REPLACE 'your-project-id' WITH YOUR ACTUAL PROJECT ID
+-- This will scan ALL datasets within this project automatically
+-- Results will be stored in a new dataset called 'metadata_analysis' in the same project
 
--- Configuration
-DECLARE batch_size INT64 DEFAULT 50;  -- Process this many tables at once
-DECLARE sample_limit INT64 DEFAULT 10;  -- Number of sample values per column
-DECLARE max_concurrent_jobs INT64 DEFAULT 10;  -- Parallel execution limit
+-- ALL VARIABLE DECLARATIONS (must be at start)
+DECLARE target_project STRING DEFAULT 'your-project-id';            -- ← CHANGE THIS TO YOUR PROJECT ID
+DECLARE results_dataset STRING DEFAULT 'metadata_analysis';         -- Results dataset (will be created)
+DECLARE batch_size INT64 DEFAULT 50;
+DECLARE sample_limit INT64 DEFAULT 10;
+DECLARE max_concurrent_jobs INT64 DEFAULT 10;
+DECLARE total_columns INT64;
+DECLARE total_batches INT64;
+DECLARE current_batch INT64 DEFAULT 1;
+DECLARE batch_statements ARRAY<STRING>;
+DECLARE stmt STRING;
+DECLARE success_count INT64 DEFAULT 0;
+DECLARE error_count INT64 DEFAULT 0;
+
+-- ============================================================================
+-- MAIN EXECUTION - DO NOT MODIFY BELOW THIS LINE
+-- ============================================================================
+
+-- Create the results dataset if it doesn't exist
+EXECUTE IMMEDIATE FORMAT('''
+CREATE SCHEMA IF NOT EXISTS `%s.%s`
+OPTIONS (
+  description="Metadata analysis results for comprehensive table scanning",
+  location="US"
+)
+''', target_project, results_dataset);
 
 -- Create results table with partitioning for better performance
-CREATE OR REPLACE TABLE `your_project.your_dataset.comprehensive_table_samples` (
+EXECUTE IMMEDIATE FORMAT('''
+CREATE OR REPLACE TABLE `%s.%s.comprehensive_table_samples` (
   scan_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
   project_id STRING,
   dataset_id STRING,
@@ -22,14 +49,37 @@ CREATE OR REPLACE TABLE `your_project.your_dataset.comprehensive_table_samples` 
   processing_time_ms INT64
 )
 PARTITION BY DATE(scan_timestamp)
-CLUSTER BY project_id, dataset_id;
+CLUSTER BY project_id, dataset_id
+OPTIONS (
+  description="Comprehensive samples of all columns across all datasets in the project"
+)
+''', target_project, results_dataset);
 
--- Get ALL tables and columns from ALL accessible projects
+-- Create error log table
+EXECUTE IMMEDIATE FORMAT('''
+CREATE OR REPLACE TABLE `%s.%s.sampling_errors` (
+  error_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+  batch_id INT64,
+  project_id STRING,
+  dataset_id STRING,
+  table_name STRING,
+  column_name STRING,
+  error_message STRING,
+  sql_statement STRING
+)
+OPTIONS (
+  description="Errors encountered during comprehensive table scanning"
+)
+''', target_project, results_dataset);
+
+-- Get ALL tables and columns from ALL datasets within the specified project
+EXECUTE IMMEDIATE FORMAT('''
 CREATE OR REPLACE TEMP TABLE all_table_columns AS
-WITH accessible_projects AS (
-  -- Get all projects you have access to
-  SELECT DISTINCT table_catalog as project_id
-  FROM `region-us.INFORMATION_SCHEMA.SCHEMATA_OVERVIEW`
+WITH all_datasets AS (
+  SELECT schema_name as dataset_id
+  FROM `%s.INFORMATION_SCHEMA.SCHEMATA`
+  WHERE catalog_name = "%s"
+    AND schema_name NOT IN ("INFORMATION_SCHEMA", "information_schema", "__TABLES__")
 ), all_columns AS (
   SELECT 
     c.table_catalog as project_id,
@@ -38,46 +88,67 @@ WITH accessible_projects AS (
     c.column_name,
     c.data_type,
     c.ordinal_position,
-    -- Generate optimized sampling query with statistics
-    FORMAT('''
-    INSERT INTO `your_project.your_dataset.comprehensive_table_samples` 
+    FORMAT("""
+    INSERT INTO `%s.%s.comprehensive_table_samples` 
     (project_id, dataset_id, table_name, column_name, data_type, sample_values, row_count, null_count, distinct_count, processing_time_ms)
     WITH start_time AS (SELECT UNIX_MILLIS(CURRENT_TIMESTAMP()) as start_ms),
     sample_data AS (
       SELECT 
-        ARRAY_AGG(CAST(%s AS STRING) IGNORE NULLS LIMIT %d) as samples,
+        ARRAY_AGG(CAST(%%s AS STRING) IGNORE NULLS LIMIT %d) as samples,
         COUNT(*) as total_rows,
-        COUNTIF(%s IS NULL) as nulls,
-        COUNT(DISTINCT %s) as distinct_vals
-      FROM `%s.%s.%s` 
-      TABLESAMPLE SYSTEM (1 PERCENT)  -- Sample 1%% for performance
+        COUNTIF(%%s IS NULL) as nulls,
+        COUNT(DISTINCT %%s) as distinct_vals
+      FROM `%%s.%%s.%%s` 
+      TABLESAMPLE SYSTEM (1 PERCENT)
     )
     SELECT 
-      "%s" as project_id,
-      "%s" as dataset_id, 
-      "%s" as table_name,
-      "%s" as column_name,
-      "%s" as data_type,
+      "%%s" as project_id,
+      "%%s" as dataset_id, 
+      "%%s" as table_name,
+      "%%s" as column_name,
+      "%%s" as data_type,
       samples as sample_values,
       total_rows,
       nulls as null_count,
       distinct_vals as distinct_count,
       UNIX_MILLIS(CURRENT_TIMESTAMP()) - start_time.start_ms as processing_time_ms
     FROM sample_data, start_time
-    ''', 
-    c.column_name, sample_limit, c.column_name, c.column_name,
+    """, 
+    c.column_name, c.column_name, c.column_name,
     c.table_catalog, c.table_schema, c.table_name,
     c.table_catalog, c.table_schema, c.table_name, c.column_name, c.data_type
     ) as sql_statement,
-    ROW_NUMBER() OVER (ORDER BY c.table_catalog, c.table_schema, c.table_name, c.ordinal_position) as row_num
-  FROM accessible_projects p
-  CROSS JOIN `region-us.INFORMATION_SCHEMA.COLUMNS` c
-  WHERE c.table_catalog = p.project_id
-    AND c.table_schema NOT IN ('INFORMATION_SCHEMA', 'information_schema', '__TABLES__')
-    AND c.table_name NOT LIKE '%_BACKUP_%'  -- Skip backup tables
-    AND c.table_name NOT LIKE 'temp_%'      -- Skip temp tables
+    ROW_NUMBER() OVER (ORDER BY c.table_schema, c.table_name, c.ordinal_position) as row_num
+  FROM all_datasets d
+  JOIN `%s.INFORMATION_SCHEMA.COLUMNS` c
+    ON c.table_schema = d.dataset_id
+    AND c.table_catalog = "%s"
+  WHERE c.table_name NOT LIKE "%%_BACKUP_%%"
+    AND c.table_name NOT LIKE "temp_%%"
+    AND c.table_name NOT LIKE "%%_temp"
+    AND c.table_name NOT LIKE "staging_%%"
 )
-SELECT * FROM all_columns;
+SELECT * FROM all_columns
+''', target_project, target_project, target_project, results_dataset, sample_limit, target_project, target_project);
+
+-- Show discovered scope
+SELECT 
+  "=== DISCOVERY COMPLETE ===" as status,
+  COUNT(DISTINCT CONCAT(project_id, '.', dataset_id)) as datasets_found,
+  COUNT(DISTINCT CONCAT(project_id, '.', dataset_id, '.', table_name)) as tables_found,
+  COUNT(*) as total_columns_found
+FROM all_table_columns;
+
+-- Show dataset breakdown
+SELECT 
+  "=== DATASET BREAKDOWN ===" as section,
+  project_id,
+  dataset_id,
+  COUNT(DISTINCT table_name) as tables_in_dataset,
+  COUNT(*) as columns_in_dataset
+FROM all_table_columns
+GROUP BY project_id, dataset_id
+ORDER BY dataset_id;
 
 -- Create batched execution plan
 CREATE OR REPLACE TEMP TABLE execution_batches AS
@@ -93,32 +164,13 @@ FROM all_table_columns
 ORDER BY batch_id, row_num;
 
 -- Get total counts for progress tracking
-DECLARE total_columns INT64;
-DECLARE total_batches INT64;
 SET total_columns = (SELECT COUNT(*) FROM all_table_columns);
 SET total_batches = (SELECT MAX(batch_id) FROM execution_batches);
 
-SELECT FORMAT("Starting processing of %d columns across %d batches", total_columns, total_batches) as status;
+SELECT FORMAT("Starting processing of %d columns across %d batches from %s project", 
+              total_columns, total_batches, target_project) as status;
 
 -- Execute batches with error handling and progress tracking
-DECLARE current_batch INT64 DEFAULT 1;
-DECLARE batch_statements ARRAY<STRING>;
-DECLARE stmt STRING;
-DECLARE success_count INT64 DEFAULT 0;
-DECLARE error_count INT64 DEFAULT 0;
-
--- Create error log table
-CREATE OR REPLACE TABLE `your_project.your_dataset.sampling_errors` (
-  error_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
-  batch_id INT64,
-  project_id STRING,
-  dataset_id STRING,
-  table_name STRING,
-  column_name STRING,
-  error_message STRING,
-  sql_statement STRING
-);
-
 WHILE current_batch <= total_batches DO
   BEGIN
     -- Get all statements for current batch
@@ -135,18 +187,23 @@ WHILE current_batch <= total_batches DO
         SET success_count = success_count + 1;
       EXCEPTION WHEN ERROR THEN
         -- Log error but continue processing
-        INSERT INTO `your_project.your_dataset.sampling_errors` 
+        EXECUTE IMMEDIATE FORMAT('''
+        INSERT INTO `%s.%s.sampling_errors` 
         (batch_id, project_id, dataset_id, table_name, column_name, error_message, sql_statement)
         SELECT 
-          current_batch,
+          %d as batch_id,
           project_id,
           dataset_id, 
           table_name,
           column_name,
-          @@error.message,
-          stmt
+          "%s" as error_message,
+          "%s" as sql_statement
         FROM execution_batches 
-        WHERE sql_statement = stmt;
+        WHERE sql_statement = "%s"
+        ''', target_project, results_dataset, current_batch, 
+        REPLACE(@@error.message, '"', '\\"'), 
+        REPLACE(stmt, '"', '\\"'), 
+        REPLACE(stmt, '"', '\\"'));
         
         SET error_count = error_count + 1;
       END;
@@ -161,9 +218,11 @@ WHILE current_batch <= total_batches DO
     SET current_batch = current_batch + 1;
   EXCEPTION WHEN ERROR THEN
     -- Log batch-level errors
-    INSERT INTO `your_project.your_dataset.sampling_errors` 
+    EXECUTE IMMEDIATE FORMAT('''
+    INSERT INTO `%s.%s.sampling_errors` 
     (batch_id, error_message)
-    VALUES (current_batch, @@error.message);
+    VALUES (%d, "%s")
+    ''', target_project, results_dataset, current_batch, REPLACE(@@error.message, '"', '\\"'));
     
     SET current_batch = current_batch + 1;
   END;
@@ -173,53 +232,71 @@ END WHILE;
 SELECT 
   "=== PROCESSING COMPLETE ===" as status,
   FORMAT("Total columns processed: %d", success_count) as success_summary,
-  FORMAT("Total errors: %d", error_count) as error_summary;
+  FORMAT("Total errors: %d", error_count) as error_summary,
+  FORMAT("Results stored in: %s.%s", target_project, results_dataset) as results_location;
 
--- Show comprehensive results with summary statistics
+-- Show comprehensive results with summary statistics by dataset
+EXECUTE IMMEDIATE FORMAT('''
 SELECT 
-  scan_timestamp,
+  "=== RESULTS BY DATASET ===" as section,
   project_id,
   dataset_id,
-  table_name,
+  COUNT(DISTINCT table_name) as tables_sampled,
   COUNT(*) as columns_sampled,
   SUM(row_count) as total_rows,
-  AVG(processing_time_ms) as avg_processing_time_ms,
-  STRING_AGG(
-    CONCAT(column_name, ' (', data_type, '): ', 
-           ARRAY_TO_STRING(sample_values, ', ')), 
-    ' | ' ORDER BY column_name LIMIT 5
-  ) as sample_column_data
-FROM `your_project.your_dataset.comprehensive_table_samples`
+  AVG(processing_time_ms) as avg_processing_time_ms
+FROM `%s.%s.comprehensive_table_samples`
 WHERE DATE(scan_timestamp) = CURRENT_DATE()
-GROUP BY scan_timestamp, project_id, dataset_id, table_name
-ORDER BY project_id, dataset_id, table_name;
+GROUP BY project_id, dataset_id
+ORDER BY dataset_id
+''', target_project, results_dataset);
+
+-- Show sample of the data collected
+EXECUTE IMMEDIATE FORMAT('''
+SELECT 
+  "=== SAMPLE DATA PREVIEW ===" as section,
+  dataset_id,
+  table_name,
+  column_name,
+  data_type,
+  ARRAY_TO_STRING(sample_values, ", ") as sample_data,
+  row_count,
+  null_count,
+  distinct_count
+FROM `%s.%s.comprehensive_table_samples`
+WHERE DATE(scan_timestamp) = CURRENT_DATE()
+ORDER BY dataset_id, table_name, column_name
+LIMIT 100
+''', target_project, results_dataset);
 
 -- Show any errors that occurred
+EXECUTE IMMEDIATE FORMAT('''
 SELECT 
   "=== ERRORS ENCOUNTERED ===" as section,
   error_timestamp,
   batch_id,
-  CONCAT(project_id, '.', dataset_id, '.', table_name) as full_table_name,
-  column_name,
-  error_message
-FROM `your_project.your_dataset.sampling_errors`
-WHERE DATE(error_timestamp) = CURRENT_DATE()
-ORDER BY error_timestamp DESC
-LIMIT 100;
-
--- Performance optimization query: Show tables with most processing time
-SELECT 
-  "=== PERFORMANCE ANALYSIS ===" as section,
-  project_id,
   dataset_id,
   table_name,
+  column_name,
+  error_message
+FROM `%s.%s.sampling_errors`
+WHERE DATE(error_timestamp) = CURRENT_DATE()
+ORDER BY error_timestamp DESC
+LIMIT 50
+''', target_project, results_dataset);
+
+-- Performance analysis by dataset
+EXECUTE IMMEDIATE FORMAT('''
+SELECT 
+  "=== PERFORMANCE BY DATASET ===" as section,
+  dataset_id,
+  COUNT(DISTINCT table_name) as tables_processed,
   COUNT(*) as columns_processed,
-  AVG(processing_time_ms) as avg_time_per_column,
-  SUM(processing_time_ms) as total_processing_time_ms,
+  SUM(processing_time_ms) as total_time_ms,
+  AVG(processing_time_ms) as avg_time_per_column_ms,
   SUM(row_count) as total_rows_sampled
-FROM `your_project.your_dataset.comprehensive_table_samples`
+FROM `%s.%s.comprehensive_table_samples`
 WHERE DATE(scan_timestamp) = CURRENT_DATE()
-GROUP BY project_id, dataset_id, table_name
-HAVING total_processing_time_ms > 1000  -- Tables that took > 1 second
-ORDER BY total_processing_time_ms DESC
-LIMIT 50;
+GROUP BY dataset_id
+ORDER BY total_time_ms DESC
+''', target_project, results_dataset);
