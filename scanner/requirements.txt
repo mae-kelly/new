@@ -1,0 +1,11 @@
+google-cloud-bigquery>=3.0.0
+google-auth>=2.0.0
+google-oauth2-tool>=0.0.3
+pandas>=1.5.0
+numpy>=1.21.0
+scikit-learn>=1.1.0
+sentence-transformers>=2.2.0
+fuzzywuzzy>=0.18.0
+python-Levenshtein>=0.12.0
+duckdb>=0.8.0
+pathlib>=1.0.1
