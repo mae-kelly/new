@@ -1,64 +1,49 @@
--- OPTIMIZED ALL-DATASETS TABLE COLUMN SAMPLER
+-- SIMPLIFIED ALL-DATASETS TABLE COLUMN SAMPLER
 -- ============================================================================
--- CONFIGURATION SECTION - UPDATE THIS VALUE BEFORE RUNNING
--- ============================================================================
--- REPLACE 'your-project-id' WITH YOUR ACTUAL PROJECT ID
--- This will scan ALL datasets within this project automatically
--- Results will be stored in a new dataset called 'metadata_analysis' in the same project
-
--- ALL VARIABLE DECLARATIONS (must be at start)
-DECLARE target_project STRING DEFAULT 'prj-fisv-n-gcss-sas-dla2f90726';   -- ← YOUR PROJECT ID HERE
-DECLARE results_dataset STRING DEFAULT 'metadata_analysis';                -- Results dataset (will be created)
-DECLARE batch_size INT64 DEFAULT 50;
-DECLARE sample_limit INT64 DEFAULT 10;
-DECLARE max_concurrent_jobs INT64 DEFAULT 10;
-DECLARE total_columns INT64;
-DECLARE total_batches INT64;
-DECLARE current_index INT64;
-DECLARE success_count INT64 DEFAULT 0;
-DECLARE error_count INT64 DEFAULT 0;
-
--- ============================================================================
--- MAIN EXECUTION - DO NOT MODIFY BELOW THIS LINE
+-- This version uses hardcoded project names to avoid concatenation issues
+-- Change the project ID in multiple places below (search for YOUR_PROJECT_HERE)
 -- ============================================================================
 
 -- Create the results dataset if it doesn't exist
-EXECUTE IMMEDIATE CONCAT(
-  'CREATE SCHEMA IF NOT EXISTS `', target_project, '.', results_dataset, '` ',
-  'OPTIONS (description="Metadata analysis results for comprehensive table scanning", location="US")'
+CREATE SCHEMA IF NOT EXISTS `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis`
+OPTIONS (
+  description="Metadata analysis results for comprehensive table scanning",
+  location="US"
 );
 
 -- Create results table with partitioning for better performance
-EXECUTE IMMEDIATE CONCAT(
-  'CREATE OR REPLACE TABLE `', target_project, '.', results_dataset, '.comprehensive_table_samples` (',
-  'scan_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP(), ',
-  'project_id STRING, ',
-  'dataset_id STRING, ',
-  'table_name STRING, ',
-  'column_name STRING, ',
-  'data_type STRING, ',
-  'sample_values ARRAY<STRING>, ',
-  'row_count INT64, ',
-  'null_count INT64, ',
-  'distinct_count INT64, ',
-  'processing_time_ms INT64) ',
-  'PARTITION BY DATE(scan_timestamp) ',
-  'CLUSTER BY project_id, dataset_id ',
-  'OPTIONS (description="Comprehensive samples of all columns across all datasets in the project")'
+CREATE OR REPLACE TABLE `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.comprehensive_table_samples` (
+  scan_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+  project_id STRING,
+  dataset_id STRING,
+  table_name STRING,
+  column_name STRING,
+  data_type STRING,
+  sample_values ARRAY<STRING>,
+  row_count INT64,
+  null_count INT64,
+  distinct_count INT64,
+  processing_time_ms INT64
+)
+PARTITION BY DATE(scan_timestamp)
+CLUSTER BY project_id, dataset_id
+OPTIONS (
+  description="Comprehensive samples of all columns across all datasets in the project"
 );
 
 -- Create error log table
-EXECUTE IMMEDIATE CONCAT(
-  'CREATE OR REPLACE TABLE `', target_project, '.', results_dataset, '.sampling_errors` (',
-  'error_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP(), ',
-  'batch_id INT64, ',
-  'project_id STRING, ',
-  'dataset_id STRING, ',
-  'table_name STRING, ',
-  'column_name STRING, ',
-  'error_message STRING, ',
-  'sql_statement STRING) ',
-  'OPTIONS (description="Errors encountered during comprehensive table scanning")'
+CREATE OR REPLACE TABLE `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.sampling_errors` (
+  error_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+  batch_id INT64,
+  project_id STRING,
+  dataset_id STRING,
+  table_name STRING,
+  column_name STRING,
+  error_message STRING,
+  sql_statement STRING
+)
+OPTIONS (
+  description="Errors encountered during comprehensive table scanning"
 );
 
 -- Get ALL tables and columns from ALL datasets within the specified project
@@ -120,12 +105,10 @@ FROM table_discovery
 GROUP BY project_id, dataset_id
 ORDER BY dataset_id;
 
--- Create batched execution plan
+-- Create execution queue
 CREATE OR REPLACE TEMP TABLE execution_queue AS
 SELECT 
-  CAST(CEIL(row_num / batch_size) AS INT64) as batch_id,
   sql_statement,
-  row_num,
   project_id,
   dataset_id,
   table_name,
@@ -134,76 +117,100 @@ SELECT
 FROM table_discovery
 ORDER BY row_num;
 
--- Get total counts for progress tracking
-SET total_columns = (SELECT COUNT(*) FROM execution_queue);
+-- Get total count
+DECLARE total_statements INT64;
+DECLARE current_order INT64 DEFAULT 1;
+DECLARE success_count INT64 DEFAULT 0;
+DECLARE error_count INT64 DEFAULT 0;
 
-SELECT FORMAT("Starting processing of %d columns from %s project", total_columns, target_project) as status;
+SET total_statements = (SELECT COUNT(*) FROM execution_queue);
 
--- Execute all statements without variables - direct execution
-SET current_index = 1;
+SELECT FORMAT("Starting processing of %d statements", total_statements) as status;
 
--- Process each statement using cursor-like approach
-WHILE current_index <= total_columns DO
+-- Process each statement individually
+WHILE current_order <= total_statements DO
   BEGIN
-    -- Execute statement directly from temp table using EXECUTE IMMEDIATE with subquery
+    -- Execute statement directly
     EXECUTE IMMEDIATE (
       SELECT sql_statement 
       FROM execution_queue 
-      WHERE execution_order = current_index
+      WHERE execution_order = current_order
     );
     
     SET success_count = success_count + 1;
     
     -- Progress update every 50 statements
-    IF MOD(current_index, 50) = 0 THEN
+    IF MOD(current_order, 50) = 0 THEN
       SELECT FORMAT("Processed %d/%d statements. Success: %d, Errors: %d", 
-                   current_index, total_columns, success_count, error_count) as progress;
+                   current_order, total_statements, success_count, error_count) as progress;
     END IF;
     
   EXCEPTION WHEN ERROR THEN
-    -- Log error using the queue table data
-    EXECUTE IMMEDIATE CONCAT(
-      'INSERT INTO `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.sampling_errors` ',
-      '(batch_id, project_id, dataset_id, table_name, column_name, error_message, sql_statement) ',
-      'SELECT batch_id, project_id, dataset_id, table_name, column_name, "', 
-      REPLACE(@@error.message, '"', '\\"'), '" as error_message, sql_statement ',
-      'FROM execution_queue WHERE execution_order = ', current_index
-    );
+    -- Log error
+    INSERT INTO `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.sampling_errors` 
+    (project_id, dataset_id, table_name, column_name, error_message, sql_statement)
+    SELECT 
+      project_id,
+      dataset_id, 
+      table_name,
+      column_name,
+      @@error.message as error_message,
+      sql_statement
+    FROM execution_queue 
+    WHERE execution_order = current_order;
     
     SET error_count = error_count + 1;
   END;
   
-  SET current_index = current_index + 1;
+  SET current_order = current_order + 1;
 END WHILE;
 
--- Final summary with comprehensive results
+-- Final summary
 SELECT 
   "=== PROCESSING COMPLETE ===" as status,
-  FORMAT("Total columns processed: %d", success_count) as success_summary,
+  FORMAT("Total statements processed: %d", success_count) as success_summary,
   FORMAT("Total errors: %d", error_count) as error_summary,
-  FORMAT("Results stored in: %s.%s", target_project, results_dataset) as results_location;
+  "Results stored in: prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis" as results_location;
 
--- Show comprehensive results with summary statistics by dataset
-EXECUTE IMMEDIATE 
-  'SELECT "=== RESULTS BY DATASET ===" as section, project_id, dataset_id, ' ||
-  'COUNT(DISTINCT table_name) as tables_sampled, COUNT(*) as columns_sampled, ' ||
-  'SUM(row_count) as total_rows, AVG(processing_time_ms) as avg_processing_time_ms ' ||
-  'FROM `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.comprehensive_table_samples` ' ||
-  'WHERE DATE(scan_timestamp) = CURRENT_DATE() ' ||
-  'GROUP BY project_id, dataset_id ORDER BY dataset_id';
+-- Show results by dataset
+SELECT 
+  "=== RESULTS BY DATASET ===" as section,
+  project_id,
+  dataset_id,
+  COUNT(DISTINCT table_name) as tables_sampled,
+  COUNT(*) as columns_sampled,
+  SUM(row_count) as total_rows,
+  AVG(processing_time_ms) as avg_processing_time_ms
+FROM `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.comprehensive_table_samples`
+WHERE DATE(scan_timestamp) = CURRENT_DATE()
+GROUP BY project_id, dataset_id
+ORDER BY dataset_id;
 
--- Show sample of the data collected
-EXECUTE IMMEDIATE 
-  'SELECT "=== SAMPLE DATA PREVIEW ===" as section, dataset_id, table_name, column_name, data_type, ' ||
-  'ARRAY_TO_STRING(sample_values, ", ") as sample_data, row_count, null_count, distinct_count ' ||
-  'FROM `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.comprehensive_table_samples` ' ||
-  'WHERE DATE(scan_timestamp) = CURRENT_DATE() ' ||
-  'ORDER BY dataset_id, table_name, column_name LIMIT 100';
+-- Show sample data
+SELECT 
+  "=== SAMPLE DATA PREVIEW ===" as section,
+  dataset_id,
+  table_name,
+  column_name,
+  data_type,
+  ARRAY_TO_STRING(sample_values, ", ") as sample_data,
+  row_count,
+  null_count,
+  distinct_count
+FROM `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.comprehensive_table_samples`
+WHERE DATE(scan_timestamp) = CURRENT_DATE()
+ORDER BY dataset_id, table_name, column_name
+LIMIT 100;
 
--- Show any errors that occurred
-EXECUTE IMMEDIATE 
-  'SELECT "=== ERRORS ENCOUNTERED ===" as section, error_timestamp, batch_id, ' ||
-  'dataset_id, table_name, column_name, error_message ' ||
-  'FROM `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.sampling_errors` ' ||
-  'WHERE DATE(error_timestamp) = CURRENT_DATE() ' ||
-  'ORDER BY error_timestamp DESC LIMIT 50';
+-- Show errors
+SELECT 
+  "=== ERRORS ENCOUNTERED ===" as section,
+  error_timestamp,
+  dataset_id,
+  table_name,
+  column_name,
+  error_message
+FROM `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.sampling_errors`
+WHERE DATE(error_timestamp) = CURRENT_DATE()
+ORDER BY error_timestamp DESC
+LIMIT 50;
