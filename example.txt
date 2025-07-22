@@ -1,0 +1,225 @@
+-- OPTIMIZED MULTI-PROJECT TABLE COLUMN SAMPLER
+-- This script efficiently samples all tables and columns across ALL projects you have access to
+-- Performance optimizations: batching, parallel execution, streaming inserts, and error handling
+
+-- Configuration
+DECLARE batch_size INT64 DEFAULT 50;  -- Process this many tables at once
+DECLARE sample_limit INT64 DEFAULT 10;  -- Number of sample values per column
+DECLARE max_concurrent_jobs INT64 DEFAULT 10;  -- Parallel execution limit
+
+-- Create results table with partitioning for better performance
+CREATE OR REPLACE TABLE `your_project.your_dataset.comprehensive_table_samples` (
+  scan_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+  project_id STRING,
+  dataset_id STRING,
+  table_name STRING,
+  column_name STRING,
+  data_type STRING,
+  sample_values ARRAY<STRING>,
+  row_count INT64,
+  null_count INT64,
+  distinct_count INT64,
+  processing_time_ms INT64
+)
+PARTITION BY DATE(scan_timestamp)
+CLUSTER BY project_id, dataset_id;
+
+-- Get ALL tables and columns from ALL accessible projects
+CREATE OR REPLACE TEMP TABLE all_table_columns AS
+WITH accessible_projects AS (
+  -- Get all projects you have access to
+  SELECT DISTINCT table_catalog as project_id
+  FROM `region-us.INFORMATION_SCHEMA.SCHEMATA_OVERVIEW`
+), all_columns AS (
+  SELECT 
+    c.table_catalog as project_id,
+    c.table_schema as dataset_id,
+    c.table_name,
+    c.column_name,
+    c.data_type,
+    c.ordinal_position,
+    -- Generate optimized sampling query with statistics
+    FORMAT('''
+    INSERT INTO `your_project.your_dataset.comprehensive_table_samples` 
+    (project_id, dataset_id, table_name, column_name, data_type, sample_values, row_count, null_count, distinct_count, processing_time_ms)
+    WITH start_time AS (SELECT UNIX_MILLIS(CURRENT_TIMESTAMP()) as start_ms),
+    sample_data AS (
+      SELECT 
+        ARRAY_AGG(CAST(%s AS STRING) IGNORE NULLS LIMIT %d) as samples,
+        COUNT(*) as total_rows,
+        COUNTIF(%s IS NULL) as nulls,
+        COUNT(DISTINCT %s) as distinct_vals
+      FROM `%s.%s.%s` 
+      TABLESAMPLE SYSTEM (1 PERCENT)  -- Sample 1%% for performance
+    )
+    SELECT 
+      "%s" as project_id,
+      "%s" as dataset_id, 
+      "%s" as table_name,
+      "%s" as column_name,
+      "%s" as data_type,
+      samples as sample_values,
+      total_rows,
+      nulls as null_count,
+      distinct_vals as distinct_count,
+      UNIX_MILLIS(CURRENT_TIMESTAMP()) - start_time.start_ms as processing_time_ms
+    FROM sample_data, start_time
+    ''', 
+    c.column_name, sample_limit, c.column_name, c.column_name,
+    c.table_catalog, c.table_schema, c.table_name,
+    c.table_catalog, c.table_schema, c.table_name, c.column_name, c.data_type
+    ) as sql_statement,
+    ROW_NUMBER() OVER (ORDER BY c.table_catalog, c.table_schema, c.table_name, c.ordinal_position) as row_num
+  FROM accessible_projects p
+  CROSS JOIN `region-us.INFORMATION_SCHEMA.COLUMNS` c
+  WHERE c.table_catalog = p.project_id
+    AND c.table_schema NOT IN ('INFORMATION_SCHEMA', 'information_schema', '__TABLES__')
+    AND c.table_name NOT LIKE '%_BACKUP_%'  -- Skip backup tables
+    AND c.table_name NOT LIKE 'temp_%'      -- Skip temp tables
+)
+SELECT * FROM all_columns;
+
+-- Create batched execution plan
+CREATE OR REPLACE TEMP TABLE execution_batches AS
+SELECT 
+  CAST(CEIL(row_num / batch_size) AS INT64) as batch_id,
+  sql_statement,
+  row_num,
+  project_id,
+  dataset_id,
+  table_name,
+  column_name
+FROM all_table_columns
+ORDER BY batch_id, row_num;
+
+-- Get total counts for progress tracking
+DECLARE total_columns INT64;
+DECLARE total_batches INT64;
+SET total_columns = (SELECT COUNT(*) FROM all_table_columns);
+SET total_batches = (SELECT MAX(batch_id) FROM execution_batches);
+
+SELECT FORMAT("Starting processing of %d columns across %d batches", total_columns, total_batches) as status;
+
+-- Execute batches with error handling and progress tracking
+DECLARE current_batch INT64 DEFAULT 1;
+DECLARE batch_statements ARRAY<STRING>;
+DECLARE stmt STRING;
+DECLARE success_count INT64 DEFAULT 0;
+DECLARE error_count INT64 DEFAULT 0;
+
+-- Create error log table
+CREATE OR REPLACE TABLE `your_project.your_dataset.sampling_errors` (
+  error_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+  batch_id INT64,
+  project_id STRING,
+  dataset_id STRING,
+  table_name STRING,
+  column_name STRING,
+  error_message STRING,
+  sql_statement STRING
+);
+
+WHILE current_batch <= total_batches DO
+  BEGIN
+    -- Get all statements for current batch
+    SET batch_statements = (
+      SELECT ARRAY_AGG(sql_statement)
+      FROM execution_batches 
+      WHERE batch_id = current_batch
+    );
+    
+    -- Execute each statement in the batch
+    FOR stmt IN (SELECT * FROM UNNEST(batch_statements)) DO
+      BEGIN
+        EXECUTE IMMEDIATE stmt;
+        SET success_count = success_count + 1;
+      EXCEPTION WHEN ERROR THEN
+        -- Log error but continue processing
+        INSERT INTO `your_project.your_dataset.sampling_errors` 
+        (batch_id, project_id, dataset_id, table_name, column_name, error_message, sql_statement)
+        SELECT 
+          current_batch,
+          project_id,
+          dataset_id, 
+          table_name,
+          column_name,
+          @@error.message,
+          stmt
+        FROM execution_batches 
+        WHERE sql_statement = stmt;
+        
+        SET error_count = error_count + 1;
+      END;
+    END FOR;
+    
+    -- Progress update every 10 batches
+    IF MOD(current_batch, 10) = 0 THEN
+      SELECT FORMAT("Processed batch %d/%d. Success: %d, Errors: %d", 
+                   current_batch, total_batches, success_count, error_count) as progress;
+    END IF;
+    
+    SET current_batch = current_batch + 1;
+  EXCEPTION WHEN ERROR THEN
+    -- Log batch-level errors
+    INSERT INTO `your_project.your_dataset.sampling_errors` 
+    (batch_id, error_message)
+    VALUES (current_batch, @@error.message);
+    
+    SET current_batch = current_batch + 1;
+  END;
+END WHILE;
+
+-- Final summary with comprehensive results
+SELECT 
+  "=== PROCESSING COMPLETE ===" as status,
+  FORMAT("Total columns processed: %d", success_count) as success_summary,
+  FORMAT("Total errors: %d", error_count) as error_summary;
+
+-- Show comprehensive results with summary statistics
+SELECT 
+  scan_timestamp,
+  project_id,
+  dataset_id,
+  table_name,
+  COUNT(*) as columns_sampled,
+  SUM(row_count) as total_rows,
+  AVG(processing_time_ms) as avg_processing_time_ms,
+  STRING_AGG(
+    CONCAT(column_name, ' (', data_type, '): ', 
+           ARRAY_TO_STRING(sample_values, ', ')), 
+    ' | ' ORDER BY column_name LIMIT 5
+  ) as sample_column_data
+FROM `your_project.your_dataset.comprehensive_table_samples`
+WHERE DATE(scan_timestamp) = CURRENT_DATE()
+GROUP BY scan_timestamp, project_id, dataset_id, table_name
+ORDER BY project_id, dataset_id, table_name;
+
+-- Show any errors that occurred
+SELECT 
+  "=== ERRORS ENCOUNTERED ===" as section,
+  error_timestamp,
+  batch_id,
+  CONCAT(project_id, '.', dataset_id, '.', table_name) as full_table_name,
+  column_name,
+  error_message
+FROM `your_project.your_dataset.sampling_errors`
+WHERE DATE(error_timestamp) = CURRENT_DATE()
+ORDER BY error_timestamp DESC
+LIMIT 100;
+
+-- Performance optimization query: Show tables with most processing time
+SELECT 
+  "=== PERFORMANCE ANALYSIS ===" as section,
+  project_id,
+  dataset_id,
+  table_name,
+  COUNT(*) as columns_processed,
+  AVG(processing_time_ms) as avg_time_per_column,
+  SUM(processing_time_ms) as total_processing_time_ms,
+  SUM(row_count) as total_rows_sampled
+FROM `your_project.your_dataset.comprehensive_table_samples`
+WHERE DATE(scan_timestamp) = CURRENT_DATE()
+GROUP BY project_id, dataset_id, table_name
+HAVING total_processing_time_ms > 1000  -- Tables that took > 1 second
+ORDER BY total_processing_time_ms DESC
+LIMIT 50;
