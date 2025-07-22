@@ -14,8 +14,6 @@ DECLARE sample_limit INT64 DEFAULT 10;
 DECLARE max_concurrent_jobs INT64 DEFAULT 10;
 DECLARE total_columns INT64;
 DECLARE total_batches INT64;
-DECLARE current_batch INT64 DEFAULT 1;
-DECLARE batch_statements ARRAY<STRING>;
 DECLARE stmt STRING;
 DECLARE stmt_index INT64;
 DECLARE success_count INT64 DEFAULT 0;
@@ -171,65 +169,65 @@ SET total_batches = (SELECT MAX(batch_id) FROM execution_batches);
 SELECT FORMAT("Starting processing of %d columns across %d batches from %s project", 
               total_columns, total_batches, target_project) as status;
 
--- Execute batches with error handling and progress tracking
-WHILE current_batch <= total_batches DO
+-- Execute all statements with simplified error handling
+CREATE OR REPLACE TEMP TABLE execution_queue AS
+SELECT 
+  row_number() OVER (ORDER BY batch_id, row_num) as execution_order,
+  sql_statement,
+  batch_id,
+  project_id,
+  dataset_id,
+  table_name,
+  column_name
+FROM execution_batches;
+
+-- Process each statement individually
+SET stmt_index = 1;
+SET total_columns = (SELECT COUNT(*) FROM execution_queue);
+
+WHILE stmt_index <= total_columns DO
   BEGIN
-    -- Get all statements for current batch
-    SET batch_statements = (
-      SELECT ARRAY_AGG(sql_statement)
-      FROM execution_batches 
-      WHERE batch_id = current_batch
+    -- Get the current statement
+    SET stmt = (
+      SELECT sql_statement 
+      FROM execution_queue 
+      WHERE execution_order = stmt_index
     );
     
-    -- Execute each statement in the batch using array indexing
-    SET stmt_index = 0;
-    WHILE stmt_index < ARRAY_LENGTH(batch_statements) DO
-      BEGIN
-        SET stmt = batch_statements[OFFSET(stmt_index)];
-        EXECUTE IMMEDIATE stmt;
-        SET success_count = success_count + 1;
-      EXCEPTION WHEN ERROR THEN
-        -- Log error but continue processing
-        EXECUTE IMMEDIATE FORMAT('''
-        INSERT INTO `%s.%s.sampling_errors` 
-        (batch_id, project_id, dataset_id, table_name, column_name, error_message, sql_statement)
-        SELECT 
-          %d as batch_id,
-          project_id,
-          dataset_id, 
-          table_name,
-          column_name,
-          "%s" as error_message,
-          "%s" as sql_statement
-        FROM execution_batches 
-        WHERE sql_statement = "%s"
-        ''', target_project, results_dataset, current_batch, 
-        REPLACE(@@error.message, '"', '\\"'), 
-        REPLACE(stmt, '"', '\\"'), 
-        REPLACE(stmt, '"', '\\"'));
-        
-        SET error_count = error_count + 1;
-      END;
-      SET stmt_index = stmt_index + 1;
-    END WHILE;
+    -- Execute the statement
+    EXECUTE IMMEDIATE stmt;
+    SET success_count = success_count + 1;
     
-    -- Progress update every 10 batches
-    IF MOD(current_batch, 10) = 0 THEN
-      SELECT FORMAT("Processed batch %d/%d. Success: %d, Errors: %d", 
-                   current_batch, total_batches, success_count, error_count) as progress;
+    -- Progress update every 100 statements
+    IF MOD(stmt_index, 100) = 0 THEN
+      SELECT FORMAT("Processed %d/%d statements. Success: %d, Errors: %d", 
+                   stmt_index, total_columns, success_count, error_count) as progress;
     END IF;
     
-    SET current_batch = current_batch + 1;
   EXCEPTION WHEN ERROR THEN
-    -- Log batch-level errors
+    -- Log error but continue processing
     EXECUTE IMMEDIATE FORMAT('''
     INSERT INTO `%s.%s.sampling_errors` 
-    (batch_id, error_message)
-    VALUES (%d, "%s")
-    ''', target_project, results_dataset, current_batch, REPLACE(@@error.message, '"', '\\"'));
+    (batch_id, project_id, dataset_id, table_name, column_name, error_message, sql_statement)
+    SELECT 
+      batch_id,
+      project_id,
+      dataset_id, 
+      table_name,
+      column_name,
+      "%s" as error_message,
+      "%s" as sql_statement
+    FROM execution_queue
+    WHERE execution_order = %d
+    ''', target_project, results_dataset, 
+    REPLACE(@@error.message, '"', '\\"'), 
+    REPLACE(stmt, '"', '\\"'),
+    stmt_index);
     
-    SET current_batch = current_batch + 1;
+    SET error_count = error_count + 1;
   END;
+  
+  SET stmt_index = stmt_index + 1;
 END WHILE;
 
 -- Final summary with comprehensive results
