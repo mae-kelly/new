@@ -1,129 +1,87 @@
--- ULTRA-SIMPLIFIED TABLE COLUMN SAMPLER - NO VARIABLES
+-- DIAGNOSTIC AND SIMPLE TABLE SCANNER
 -- ============================================================================
--- This version uses NO variables to avoid any concatenation issues
+-- Let's first test basic access and then build up from there
 -- ============================================================================
 
--- Create the results dataset if it doesn't exist
-CREATE SCHEMA IF NOT EXISTS `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis`
-OPTIONS (
-  description="Metadata analysis results for comprehensive table scanning",
-  location="US"
-);
+-- Step 1: Test basic access to your project
+SELECT 
+  "=== PROJECT ACCESS TEST ===" as test_section,
+  "Testing if we can access your project..." as status;
 
--- Create results table
-CREATE OR REPLACE TABLE `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.comprehensive_table_samples` (
+-- Step 2: Try to list datasets in your current project (using default project)
+SELECT 
+  "=== AVAILABLE DATASETS IN CURRENT PROJECT ===" as section,
+  schema_name as dataset_name
+FROM `INFORMATION_SCHEMA.SCHEMATA`
+WHERE schema_name NOT IN ('INFORMATION_SCHEMA', 'information_schema', '__TABLES__')
+ORDER BY schema_name;
+
+-- Step 3: Try to get basic table info from current project
+SELECT 
+  "=== TABLES IN CURRENT PROJECT ===" as section,
+  table_schema as dataset_id,
+  table_name,
+  COUNT(*) as column_count
+FROM `INFORMATION_SCHEMA.COLUMNS`
+WHERE table_schema NOT IN ('INFORMATION_SCHEMA', 'information_schema', '__TABLES__')
+  AND table_name NOT LIKE '%_BACKUP_%'
+  AND table_name NOT LIKE 'temp_%'
+GROUP BY table_schema, table_name
+ORDER BY table_schema, table_name
+LIMIT 50;
+
+-- Step 4: Create a simple results table in the current project's default dataset
+-- (This will use whatever dataset BigQuery defaults to)
+CREATE OR REPLACE TABLE table_samples (
   scan_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
-  project_id STRING,
   dataset_id STRING,
   table_name STRING,
   column_name STRING,
   data_type STRING,
-  sample_values ARRAY<STRING>,
-  row_count INT64,
-  null_count INT64,
-  distinct_count INT64,
-  processing_time_ms INT64
-)
-PARTITION BY DATE(scan_timestamp)
-CLUSTER BY project_id, dataset_id;
-
--- Create error log table
-CREATE OR REPLACE TABLE `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.sampling_errors` (
-  error_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
-  project_id STRING,
-  dataset_id STRING,
-  table_name STRING,
-  column_name STRING,
-  error_message STRING,
-  sql_statement STRING
+  sample_note STRING
 );
 
--- Show discovered datasets and tables
+-- Step 5: Insert some basic metadata without sampling actual data yet
+INSERT INTO table_samples (dataset_id, table_name, column_name, data_type, sample_note)
 SELECT 
-  "=== DISCOVERY RESULTS ===" as section,
-  COUNT(DISTINCT table_schema) as datasets_found,
-  COUNT(DISTINCT CONCAT(table_schema, '.', table_name)) as tables_found,
-  COUNT(*) as total_columns_found
-FROM `prj-fisv-n-gcss-sas-dla2f90726.INFORMATION_SCHEMA.COLUMNS`
-WHERE table_catalog = "prj-fisv-n-gcss-sas-dla2f90726"
-  AND table_schema NOT IN ("INFORMATION_SCHEMA", "information_schema", "__TABLES__")
-  AND table_name NOT LIKE "%_BACKUP_%"
-  AND table_name NOT LIKE "temp_%"
-  AND table_name NOT LIKE "%_temp"
-  AND table_name NOT LIKE "staging_%";
-
--- Show dataset breakdown
-SELECT 
-  "=== DATASET BREAKDOWN ===" as section,
-  table_schema as dataset_id,
-  COUNT(DISTINCT table_name) as tables_in_dataset,
-  COUNT(*) as columns_in_dataset
-FROM `prj-fisv-n-gcss-sas-dla2f90726.INFORMATION_SCHEMA.COLUMNS`
-WHERE table_catalog = "prj-fisv-n-gcss-sas-dla2f90726"
-  AND table_schema NOT IN ("INFORMATION_SCHEMA", "information_schema", "__TABLES__")
-  AND table_name NOT LIKE "%_BACKUP_%"
-  AND table_name NOT LIKE "temp_%"
-  AND table_name NOT LIKE "%_temp"
-  AND table_name NOT LIKE "staging_%"
-GROUP BY table_schema
-ORDER BY table_schema;
-
--- Create a simplified sampling approach - sample 5 tables to start
--- This will sample the first few tables to test the approach
-
--- Sample from first table found
-INSERT INTO `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.comprehensive_table_samples` 
-(project_id, dataset_id, table_name, column_name, data_type, sample_values, row_count, null_count, distinct_count, processing_time_ms)
-WITH start_time AS (SELECT UNIX_MILLIS(CURRENT_TIMESTAMP()) as start_ms),
-first_table AS (
-  SELECT table_schema, table_name, column_name, data_type
-  FROM `prj-fisv-n-gcss-sas-dla2f90726.INFORMATION_SCHEMA.COLUMNS`
-  WHERE table_catalog = "prj-fisv-n-gcss-sas-dla2f90726"
-    AND table_schema NOT IN ("INFORMATION_SCHEMA", "information_schema", "__TABLES__")
-    AND table_name NOT LIKE "%_BACKUP_%"
-    AND table_name NOT LIKE "temp_%"
-    AND table_name NOT LIKE "%_temp"
-    AND table_name NOT LIKE "staging_%"
-  ORDER BY table_schema, table_name, ordinal_position
-  LIMIT 10
-)
-SELECT 
-  "prj-fisv-n-gcss-sas-dla2f90726" as project_id,
   table_schema as dataset_id,
   table_name,
   column_name,
   data_type,
-  ["SAMPLE_PLACEHOLDER"] as sample_values,
-  0 as row_count,
-  0 as null_count, 
-  0 as distinct_count,
-  UNIX_MILLIS(CURRENT_TIMESTAMP()) - start_time.start_ms as processing_time_ms
-FROM first_table, start_time;
+  'Metadata collected' as sample_note
+FROM `INFORMATION_SCHEMA.COLUMNS`
+WHERE table_schema NOT IN ('INFORMATION_SCHEMA', 'information_schema', '__TABLES__')
+  AND table_name NOT LIKE '%_BACKUP_%'
+  AND table_name NOT LIKE 'temp_%'
+ORDER BY table_schema, table_name, ordinal_position
+LIMIT 100;
 
--- Show what we've collected so far
+-- Step 6: Show what we collected
 SELECT 
-  "=== INITIAL SAMPLE COMPLETE ===" as status,
-  COUNT(*) as columns_sampled
-FROM `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.comprehensive_table_samples`
-WHERE DATE(scan_timestamp) = CURRENT_DATE();
+  "=== BASIC COLLECTION RESULTS ===" as section,
+  COUNT(DISTINCT dataset_id) as datasets_found,
+  COUNT(DISTINCT CONCAT(dataset_id, '.', table_name)) as tables_found,
+  COUNT(*) as columns_found
+FROM table_samples;
 
--- Show the sampled data
+-- Step 7: Show sample of collected data
 SELECT 
-  "=== SAMPLE RESULTS ===" as section,
+  "=== SAMPLE OF COLLECTED METADATA ===" as section,
   dataset_id,
   table_name,
   column_name,
-  data_type
-FROM `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.comprehensive_table_samples`
-WHERE DATE(scan_timestamp) = CURRENT_DATE()
-ORDER BY dataset_id, table_name, column_name;
+  data_type,
+  sample_note
+FROM table_samples
+ORDER BY dataset_id, table_name, column_name
+LIMIT 20;
 
--- Show all available datasets for reference
+-- Step 8: Show dataset summary
 SELECT 
-  "=== ALL AVAILABLE DATASETS ===" as section,
-  schema_name as dataset_name,
-  "Ready for sampling" as status
-FROM `prj-fisv-n-gcss-sas-dla2f90726.INFORMATION_SCHEMA.SCHEMATA`
-WHERE catalog_name = "prj-fisv-n-gcss-sas-dla2f90726"
-  AND schema_name NOT IN ("INFORMATION_SCHEMA", "information_schema", "__TABLES__")
-ORDER BY schema_name;
+  "=== DATASET SUMMARY ===" as section,
+  dataset_id,
+  COUNT(DISTINCT table_name) as tables_count,
+  COUNT(*) as columns_count
+FROM table_samples
+GROUP BY dataset_id
+ORDER BY dataset_id;
