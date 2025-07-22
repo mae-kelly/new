@@ -181,9 +181,9 @@ WHILE current_batch <= total_batches DO
     );
     
     -- Execute each statement in the batch
-    FOR stmt IN (SELECT * FROM UNNEST(batch_statements)) DO
+    FOR current_stmt IN (SELECT * FROM UNNEST(batch_statements)) DO
       BEGIN
-        EXECUTE IMMEDIATE stmt;
+        EXECUTE IMMEDIATE current_stmt;
         SET success_count = success_count + 1;
       EXCEPTION WHEN ERROR THEN
         -- Log error but continue processing
@@ -202,8 +202,8 @@ WHILE current_batch <= total_batches DO
         WHERE sql_statement = "%s"
         ''', target_project, results_dataset, current_batch, 
         REPLACE(@@error.message, '"', '\\"'), 
-        REPLACE(stmt, '"', '\\"'), 
-        REPLACE(stmt, '"', '\\"'));
+        REPLACE(current_stmt, '"', '\\"'), 
+        REPLACE(current_stmt, '"', '\\"'));
         
         SET error_count = error_count + 1;
       END;
