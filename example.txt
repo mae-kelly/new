@@ -1,4 +1,65 @@
--- STEP 1: Create the results table first
+-- Create the results table first
+CREATE OR REPLACE TABLE `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.table_column_samples` (
+  project_id STRING,
+  dataset_id STRING,
+  table_name STRING,
+  column_name STRING,
+  data_type STRING,
+  sample_values ARRAY<STRING>
+);
+
+-- =============================================================================
+-- Query to generate INSERT statements for sampling
+-- =============================================================================
+
+SELECT 
+  table_catalog as project_id,
+  table_schema as dataset_id,
+  table_name,
+  column_name,
+  data_type,
+  FORMAT("""INSERT INTO `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.table_column_samples`
+SELECT 
+  '%s' as project_id,
+  '%s' as dataset_id,
+  '%s' as table_name,
+  '%s' as column_name,
+  '%s' as data_type,
+  ARRAY_AGG(CAST(%s AS STRING) IGNORE NULLS LIMIT 5) as sample_values
+FROM `%s.%s.%s`
+WHERE %s IS NOT NULL
+HAVING COUNT(*) > 0;""", 
+  table_catalog, table_schema, table_name, column_name, data_type, 
+  column_name, table_catalog, table_schema, table_name, column_name
+  ) as generated_query
+FROM 
+  `prj-fisv-p-gcss-sas-d19dd0f1df.INFORMATION_SCHEMA.COLUMNS`
+WHERE 
+  table_schema NOT IN ('INFORMATION_SCHEMA', 'information_schema')
+ORDER BY 
+  table_catalog, table_schema, table_name, ordinal_position
+LIMIT 20;
+
+-- =============================================================================
+-- Alternative: Simple table overview
+-- =============================================================================
+
+/*
+SELECT 
+  table_catalog as project_id,
+  table_schema as dataset_id,
+  table_name,
+  COUNT(*) as column_count,
+  STRING_AGG(column_name, ', ' ORDER BY ordinal_position) as all_columns
+FROM 
+  `prj-fisv-p-gcss-sas-d19dd0f1df.INFORMATION_SCHEMA.COLUMNS`
+WHERE 
+  table_schema NOT IN ('INFORMATION_SCHEMA', 'information_schema')
+GROUP BY 
+  table_catalog, table_schema, table_name
+ORDER BY 
+  project_id, dataset_id, table_name;
+*/-- STEP 1: Create the results table first
 CREATE OR REPLACE TABLE `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.table_column_samples` (
   project_id STRING,
   dataset_id STRING,
