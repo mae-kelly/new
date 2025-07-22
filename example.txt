@@ -1,0 +1,122 @@
+-- APPROACH 1: Complete automated solution with dynamic sampling
+-- BigQuery script to get all tables, columns, and sample data
+-- This uses INFORMATION_SCHEMA to discover tables and columns, then dynamically samples data
+
+DECLARE sql_statements ARRAY<STRING>;
+DECLARE i INT64 DEFAULT 0;
+DECLARE statement STRING;
+
+-- Create a temporary table to store our results
+CREATE OR REPLACE TABLE `your_project.your_dataset.table_column_samples` (
+  project_id STRING,
+  dataset_id STRING,
+  table_name STRING,
+  column_name STRING,
+  data_type STRING,
+  sample_values ARRAY<STRING>
+);
+
+-- Get all tables and columns from INFORMATION_SCHEMA
+CREATE OR REPLACE TEMP TABLE table_columns AS
+SELECT 
+  table_catalog as project_id,
+  table_schema as dataset_id,
+  table_name,
+  column_name,
+  data_type,
+  CONCAT(
+    'INSERT INTO `your_project.your_dataset.table_column_samples` ',
+    'SELECT "', table_catalog, '" as project_id, ',
+    '"', table_schema, '" as dataset_id, ',
+    '"', table_name, '" as table_name, ',
+    '"', column_name, '" as column_name, ',
+    '"', data_type, '" as data_type, ',
+    'ARRAY_AGG(CAST(', column_name, ' AS STRING) IGNORE NULLS LIMIT 5) as sample_values ',
+    'FROM `', table_catalog, '.', table_schema, '.', table_name, '` ',
+    'WHERE ', column_name, ' IS NOT NULL ',
+    'HAVING COUNT(*) > 0'
+  ) as sql_statement
+FROM 
+  `your_project.your_dataset.INFORMATION_SCHEMA.COLUMNS`
+WHERE 
+  table_schema NOT IN ('INFORMATION_SCHEMA', 'information_schema')
+ORDER BY 
+  table_catalog, table_schema, table_name, ordinal_position;
+
+-- Convert the SQL statements to an array
+SET sql_statements = (
+  SELECT ARRAY_AGG(sql_statement) 
+  FROM table_columns
+);
+
+-- Execute each statement dynamically
+WHILE i < ARRAY_LENGTH(sql_statements) DO
+  SET statement = sql_statements[OFFSET(i)];
+  EXECUTE IMMEDIATE statement;
+  SET i = i + 1;
+END WHILE;
+
+-- Final result: Show all tables, columns, and their sample values
+SELECT 
+  project_id,
+  dataset_id,
+  table_name,
+  column_name,
+  data_type,
+  sample_values
+FROM 
+  `your_project.your_dataset.table_column_samples`
+ORDER BY 
+  project_id, dataset_id, table_name, column_name;
+
+-- =============================================================================
+-- APPROACH 2: Schema discovery with generated sampling queries
+-- Use this if you prefer to run the sampling queries manually
+-- =============================================================================
+
+/*
+-- Step 1: Get all table and column information
+SELECT 
+  table_catalog as project_id,
+  table_schema as dataset_id,
+  table_name,
+  column_name,
+  data_type,
+  ordinal_position,
+  -- Generate sampling query for each column
+  CONCAT(
+    'SELECT "', table_catalog, '.' , table_schema, '.', table_name, '" as table_full_name, ',
+    '"', column_name, '" as column_name, ',
+    'ARRAY_AGG(CAST(', column_name, ' AS STRING) IGNORE NULLS LIMIT 5) as sample_values ',
+    'FROM `', table_catalog, '.', table_schema, '.', table_name, '` ',
+    'WHERE ', column_name, ' IS NOT NULL'
+  ) as sampling_query
+FROM 
+  `your_project.your_dataset.INFORMATION_SCHEMA.COLUMNS`
+WHERE 
+  table_schema NOT IN ('INFORMATION_SCHEMA', 'information_schema')
+ORDER BY 
+  table_catalog, table_schema, table_name, ordinal_position;
+*/
+
+-- =============================================================================
+-- APPROACH 3: Quick schema overview without samples
+-- Use this for a fast overview of all tables and columns
+-- =============================================================================
+
+/*
+SELECT 
+  table_catalog as project_id,
+  table_schema as dataset_id,
+  table_name,
+  COUNT(*) as column_count,
+  STRING_AGG(CONCAT(column_name, ' (', data_type, ')'), ', ' ORDER BY ordinal_position) as columns
+FROM 
+  `your_project.your_dataset.INFORMATION_SCHEMA.COLUMNS`
+WHERE 
+  table_schema NOT IN ('INFORMATION_SCHEMA', 'information_schema')
+GROUP BY 
+  table_catalog, table_schema, table_name
+ORDER BY 
+  project_id, dataset_id, table_name;
+*/
