@@ -17,6 +17,7 @@ DECLARE total_batches INT64;
 DECLARE current_batch INT64 DEFAULT 1;
 DECLARE batch_statements ARRAY<STRING>;
 DECLARE stmt STRING;
+DECLARE stmt_index INT64;
 DECLARE success_count INT64 DEFAULT 0;
 DECLARE error_count INT64 DEFAULT 0;
 
@@ -180,10 +181,12 @@ WHILE current_batch <= total_batches DO
       WHERE batch_id = current_batch
     );
     
-    -- Execute each statement in the batch
-    FOR current_stmt IN (SELECT * FROM UNNEST(batch_statements)) DO
+    -- Execute each statement in the batch using array indexing
+    SET stmt_index = 0;
+    WHILE stmt_index < ARRAY_LENGTH(batch_statements) DO
       BEGIN
-        EXECUTE IMMEDIATE current_stmt;
+        SET stmt = batch_statements[OFFSET(stmt_index)];
+        EXECUTE IMMEDIATE stmt;
         SET success_count = success_count + 1;
       EXCEPTION WHEN ERROR THEN
         -- Log error but continue processing
@@ -202,12 +205,13 @@ WHILE current_batch <= total_batches DO
         WHERE sql_statement = "%s"
         ''', target_project, results_dataset, current_batch, 
         REPLACE(@@error.message, '"', '\\"'), 
-        REPLACE(current_stmt, '"', '\\"'), 
-        REPLACE(current_stmt, '"', '\\"'));
+        REPLACE(stmt, '"', '\\"'), 
+        REPLACE(stmt, '"', '\\"'));
         
         SET error_count = error_count + 1;
       END;
-    END FOR;
+      SET stmt_index = stmt_index + 1;
+    END WHILE;
     
     -- Progress update every 10 batches
     IF MOD(current_batch, 10) = 0 THEN
