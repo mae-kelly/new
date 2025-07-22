@@ -1,4 +1,110 @@
--- APPROACH 1: Generate sampling queries (no scripting required)
+-- STEP 1: Create the results table first
+CREATE OR REPLACE TABLE `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.table_column_samples` (
+  project_id STRING,
+  dataset_id STRING,
+  table_name STRING,
+  column_name STRING,
+  data_type STRING,
+  sample_values ARRAY<STRING>
+);
+
+-- =============================================================================
+-- STEP 2: Generate sampling queries (run this to get the INSERT statements)
+-- =============================================================================
+
+SELECT 
+  table_catalog as project_id,
+  table_schema as dataset_id,
+  table_name,
+  column_name,
+  data_type,
+  ordinal_position,
+  -- Generate the sampling query for each column
+  FORMAT("""INSERT INTO `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.table_column_samples`
+SELECT 
+  '%s' as project_id,
+  '%s' as dataset_id,
+  '%s' as table_name,
+  '%s' as column_name,
+  '%s' as data_type,
+  ARRAY_AGG(CAST(%s AS STRING) IGNORE NULLS LIMIT 5) as sample_values
+FROM `%s.%s.%s`
+WHERE %s IS NOT NULL
+HAVING COUNT(*) > 0;""", 
+  table_catalog, table_schema, table_name, column_name, data_type, 
+  column_name, table_catalog, table_schema, table_name, column_name
+  ) as copy_and_run_this_query
+FROM 
+  `prj-fisv-p-gcss-sas-d19dd0f1df.INFORMATION_SCHEMA.COLUMNS`
+WHERE 
+  table_schema NOT IN ('INFORMATION_SCHEMA', 'information_schema')
+ORDER BY 
+  table_catalog, table_schema, table_name, ordinal_position
+LIMIT 50; -- Start with first 50 columns, remove limit for all
+
+-- =============================================================================
+-- ALTERNATIVE: Quick table and column overview (no samples)
+-- =============================================================================
+
+/*
+SELECT 
+  table_catalog as project_id,
+  table_schema as dataset_id,
+  table_name,
+  COUNT(*) as column_count,
+  STRING_AGG(
+    CONCAT(column_name, ' (', data_type, ')'), 
+    ', ' 
+    ORDER BY ordinal_position
+  ) as all_columns_with_types,
+  STRING_AGG(column_name, ', ' ORDER BY ordinal_position) as column_names_only
+FROM 
+  `prj-fisv-p-gcss-sas-d19dd0f1df.INFORMATION_SCHEMA.COLUMNS`
+WHERE 
+  table_schema NOT IN ('INFORMATION_SCHEMA', 'information_schema')
+GROUP BY 
+  table_catalog, table_schema, table_name
+ORDER BY 
+  project_id, dataset_id, table_name;
+*/
+
+-- =============================================================================
+-- STEP 3: After running the generated queries, view your results
+-- =============================================================================
+
+/*
+SELECT 
+  project_id,
+  dataset_id,
+  table_name,
+  column_name,
+  data_type,
+  sample_values,
+  ARRAY_LENGTH(sample_values) as sample_count
+FROM 
+  `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.table_column_samples`
+ORDER BY 
+  project_id, dataset_id, table_name, column_name;
+*/
+
+-- =============================================================================
+-- EXAMPLE: Manual sampling for specific table (template)
+-- =============================================================================
+
+/*
+-- If you want to sample a specific table manually, use this pattern:
+INSERT INTO `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.table_column_samples`
+SELECT 
+  'prj-fisv-p-gcss-sas-d19dd0f1df' as project_id,
+  'CSIRT' as dataset_id,
+  'your_table_name' as table_name,
+  'your_column_name' as column_name,
+  'STRING' as data_type,
+  ARRAY_AGG(CAST(your_column_name AS STRING) IGNORE NULLS LIMIT 5) as sample_values
+FROM `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.your_table_name`
+WHERE your_column_name IS NOT NULL
+HAVING COUNT(*) > 0;
+*/-- APPROACH 1: Generate sampling queries (no scripting required)
 -- This approach generates the SQL statements you need to run manually
 
 SELECT 
