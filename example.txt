@@ -62,46 +62,44 @@ EXECUTE IMMEDIATE CONCAT(
 );
 
 -- Get ALL tables and columns from ALL datasets within the specified project
-EXECUTE IMMEDIATE CONCAT(
-  'CREATE OR REPLACE TEMP TABLE table_discovery AS ',
-  'WITH all_datasets AS (',
-  '  SELECT schema_name as dataset_id ',
-  '  FROM `', target_project, '.INFORMATION_SCHEMA.SCHEMATA` ',
-  '  WHERE catalog_name = "', target_project, '" ',
-  '    AND schema_name NOT IN ("INFORMATION_SCHEMA", "information_schema", "__TABLES__") ',
-  '), all_columns AS (',
-  '  SELECT ',
-  '    c.table_catalog as project_id, ',
-  '    c.table_schema as dataset_id, ',
-  '    c.table_name, ',
-  '    c.column_name, ',
-  '    c.data_type, ',
-  '    c.ordinal_position, ',
-  '    CONCAT(',
-  '      "INSERT INTO `', target_project, '.', results_dataset, '.comprehensive_table_samples` ",',
-  '      "(project_id, dataset_id, table_name, column_name, data_type, sample_values, row_count, null_count, distinct_count, processing_time_ms) ",',
-  '      "WITH start_time AS (SELECT UNIX_MILLIS(CURRENT_TIMESTAMP()) as start_ms), ",',
-  '      "sample_data AS (SELECT ARRAY_AGG(CAST(", c.column_name, " AS STRING) IGNORE NULLS LIMIT ', sample_limit, ') as samples, ",',
-  '      "COUNT(*) as total_rows, COUNTIF(", c.column_name, " IS NULL) as nulls, COUNT(DISTINCT ", c.column_name, ") as distinct_vals ",',
-  '      "FROM `", c.table_catalog, ".", c.table_schema, ".", c.table_name, "` TABLESAMPLE SYSTEM (1 PERCENT)) ",',
-  '      "SELECT \\\"", c.table_catalog, "\\\" as project_id, \\\"", c.table_schema, "\\\" as dataset_id, ",',
-  '      "\\\"", c.table_name, "\\\" as table_name, \\\"", c.column_name, "\\\" as column_name, ",',
-  '      "\\\"", c.data_type, "\\\" as data_type, samples as sample_values, total_rows, nulls as null_count, ",',
-  '      "distinct_vals as distinct_count, UNIX_MILLIS(CURRENT_TIMESTAMP()) - start_time.start_ms as processing_time_ms ",',
-  '      "FROM sample_data, start_time"',
-  '    ) as sql_statement, ',
-  '    ROW_NUMBER() OVER (ORDER BY c.table_schema, c.table_name, c.ordinal_position) as row_num ',
-  '  FROM all_datasets d ',
-  '  JOIN `', target_project, '.INFORMATION_SCHEMA.COLUMNS` c ',
-  '    ON c.table_schema = d.dataset_id ',
-  '    AND c.table_catalog = "', target_project, '" ',
-  '  WHERE c.table_name NOT LIKE "%_BACKUP_%" ',
-  '    AND c.table_name NOT LIKE "temp_%" ',
-  '    AND c.table_name NOT LIKE "%_temp" ',
-  '    AND c.table_name NOT LIKE "staging_%" ',
-  ') ',
-  'SELECT * FROM all_columns'
-);
+CREATE OR REPLACE TEMP TABLE table_discovery AS
+WITH all_datasets AS (
+  SELECT schema_name as dataset_id
+  FROM `prj-fisv-n-gcss-sas-dla2f90726.INFORMATION_SCHEMA.SCHEMATA`
+  WHERE catalog_name = "prj-fisv-n-gcss-sas-dla2f90726"
+    AND schema_name NOT IN ("INFORMATION_SCHEMA", "information_schema", "__TABLES__")
+), all_columns AS (
+  SELECT 
+    c.table_catalog as project_id,
+    c.table_schema as dataset_id,
+    c.table_name,
+    c.column_name,
+    c.data_type,
+    c.ordinal_position,
+    CONCAT(
+      'INSERT INTO `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.comprehensive_table_samples` ',
+      '(project_id, dataset_id, table_name, column_name, data_type, sample_values, row_count, null_count, distinct_count, processing_time_ms) ',
+      'WITH start_time AS (SELECT UNIX_MILLIS(CURRENT_TIMESTAMP()) as start_ms), ',
+      'sample_data AS (SELECT ARRAY_AGG(CAST(', c.column_name, ' AS STRING) IGNORE NULLS LIMIT 10) as samples, ',
+      'COUNT(*) as total_rows, COUNTIF(', c.column_name, ' IS NULL) as nulls, COUNT(DISTINCT ', c.column_name, ') as distinct_vals ',
+      'FROM `', c.table_catalog, '.', c.table_schema, '.', c.table_name, '` TABLESAMPLE SYSTEM (1 PERCENT)) ',
+      'SELECT "', c.table_catalog, '" as project_id, "', c.table_schema, '" as dataset_id, ',
+      '"', c.table_name, '" as table_name, "', c.column_name, '" as column_name, ',
+      '"', c.data_type, '" as data_type, samples as sample_values, total_rows, nulls as null_count, ',
+      'distinct_vals as distinct_count, UNIX_MILLIS(CURRENT_TIMESTAMP()) - start_time.start_ms as processing_time_ms ',
+      'FROM sample_data, start_time'
+    ) as sql_statement,
+    ROW_NUMBER() OVER (ORDER BY c.table_schema, c.table_name, c.ordinal_position) as row_num
+  FROM all_datasets d
+  JOIN `prj-fisv-n-gcss-sas-dla2f90726.INFORMATION_SCHEMA.COLUMNS` c
+    ON c.table_schema = d.dataset_id
+    AND c.table_catalog = "prj-fisv-n-gcss-sas-dla2f90726"
+  WHERE c.table_name NOT LIKE "%_BACKUP_%"
+    AND c.table_name NOT LIKE "temp_%"
+    AND c.table_name NOT LIKE "%_temp"
+    AND c.table_name NOT LIKE "staging_%"
+)
+SELECT * FROM all_columns;
 
 -- Show discovered scope
 SELECT 
@@ -165,7 +163,7 @@ WHILE current_index <= total_columns DO
   EXCEPTION WHEN ERROR THEN
     -- Log error using the queue table data
     EXECUTE IMMEDIATE CONCAT(
-      'INSERT INTO `', target_project, '.', results_dataset, '.sampling_errors` ',
+      'INSERT INTO `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.sampling_errors` ',
       '(batch_id, project_id, dataset_id, table_name, column_name, error_message, sql_statement) ',
       'SELECT batch_id, project_id, dataset_id, table_name, column_name, "', 
       REPLACE(@@error.message, '"', '\\"'), '" as error_message, sql_statement ',
@@ -186,29 +184,26 @@ SELECT
   FORMAT("Results stored in: %s.%s", target_project, results_dataset) as results_location;
 
 -- Show comprehensive results with summary statistics by dataset
-EXECUTE IMMEDIATE CONCAT(
-  'SELECT "=== RESULTS BY DATASET ===" as section, project_id, dataset_id, ',
-  'COUNT(DISTINCT table_name) as tables_sampled, COUNT(*) as columns_sampled, ',
-  'SUM(row_count) as total_rows, AVG(processing_time_ms) as avg_processing_time_ms ',
-  'FROM `', target_project, '.', results_dataset, '.comprehensive_table_samples` ',
-  'WHERE DATE(scan_timestamp) = CURRENT_DATE() ',
-  'GROUP BY project_id, dataset_id ORDER BY dataset_id'
-);
+EXECUTE IMMEDIATE 
+  'SELECT "=== RESULTS BY DATASET ===" as section, project_id, dataset_id, ' ||
+  'COUNT(DISTINCT table_name) as tables_sampled, COUNT(*) as columns_sampled, ' ||
+  'SUM(row_count) as total_rows, AVG(processing_time_ms) as avg_processing_time_ms ' ||
+  'FROM `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.comprehensive_table_samples` ' ||
+  'WHERE DATE(scan_timestamp) = CURRENT_DATE() ' ||
+  'GROUP BY project_id, dataset_id ORDER BY dataset_id';
 
 -- Show sample of the data collected
-EXECUTE IMMEDIATE CONCAT(
-  'SELECT "=== SAMPLE DATA PREVIEW ===" as section, dataset_id, table_name, column_name, data_type, ',
-  'ARRAY_TO_STRING(sample_values, ", ") as sample_data, row_count, null_count, distinct_count ',
-  'FROM `', target_project, '.', results_dataset, '.comprehensive_table_samples` ',
-  'WHERE DATE(scan_timestamp) = CURRENT_DATE() ',
-  'ORDER BY dataset_id, table_name, column_name LIMIT 100'
-);
+EXECUTE IMMEDIATE 
+  'SELECT "=== SAMPLE DATA PREVIEW ===" as section, dataset_id, table_name, column_name, data_type, ' ||
+  'ARRAY_TO_STRING(sample_values, ", ") as sample_data, row_count, null_count, distinct_count ' ||
+  'FROM `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.comprehensive_table_samples` ' ||
+  'WHERE DATE(scan_timestamp) = CURRENT_DATE() ' ||
+  'ORDER BY dataset_id, table_name, column_name LIMIT 100';
 
 -- Show any errors that occurred
-EXECUTE IMMEDIATE CONCAT(
-  'SELECT "=== ERRORS ENCOUNTERED ===" as section, error_timestamp, batch_id, ',
-  'dataset_id, table_name, column_name, error_message ',
-  'FROM `', target_project, '.', results_dataset, '.sampling_errors` ',
-  'WHERE DATE(error_timestamp) = CURRENT_DATE() ',
-  'ORDER BY error_timestamp DESC LIMIT 50'
-);
+EXECUTE IMMEDIATE 
+  'SELECT "=== ERRORS ENCOUNTERED ===" as section, error_timestamp, batch_id, ' ||
+  'dataset_id, table_name, column_name, error_message ' ||
+  'FROM `prj-fisv-n-gcss-sas-dla2f90726.metadata_analysis.sampling_errors` ' ||
+  'WHERE DATE(error_timestamp) = CURRENT_DATE() ' ||
+  'ORDER BY error_timestamp DESC LIMIT 50';
