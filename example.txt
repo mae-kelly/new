@@ -1,4 +1,146 @@
--- APPROACH 1A: Batch processing solution to avoid size limits
+-- APPROACH 1: Generate sampling queries (no scripting required)
+-- This approach generates the SQL statements you need to run manually
+
+SELECT 
+  table_catalog as project_id,
+  table_schema as dataset_id,
+  table_name,
+  column_name,
+  data_type,
+  ordinal_position,
+  -- Generate the sampling query for each column
+  FORMAT("""
+INSERT INTO `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.table_column_samples`
+SELECT 
+  '%s' as project_id,
+  '%s' as dataset_id,
+  '%s' as table_name,
+  '%s' as column_name,
+  '%s' as data_type,
+  ARRAY_AGG(CAST(%s AS STRING) IGNORE NULLS LIMIT 5) as sample_values
+FROM `%s.%s.%s`
+WHERE %s IS NOT NULL
+HAVING COUNT(*) > 0;
+  """, 
+  table_catalog, table_schema, table_name, column_name, data_type, 
+  column_name, table_catalog, table_schema, table_name, column_name
+  ) as sampling_query
+FROM 
+  `prj-fisv-p-gcss-sas-d19dd0f1df.INFORMATION_SCHEMA.COLUMNS`
+WHERE 
+  table_schema NOT IN ('INFORMATION_SCHEMA', 'information_schema')
+  -- Optionally filter to specific datasets to reduce output
+  -- AND table_schema IN ('CSIRT', 'your_other_dataset')
+ORDER BY 
+  table_catalog, table_schema, table_name, ordinal_position
+LIMIT 100; -- Remove this limit or increase as needed
+
+-- =============================================================================
+-- APPROACH 2: Union-based sampling (single query, limited tables)
+-- =============================================================================
+
+/*
+-- First, create the results table
+CREATE OR REPLACE TABLE `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.table_column_samples` (
+  project_id STRING,
+  dataset_id STRING,
+  table_name STRING,
+  column_name STRING,
+  data_type STRING,
+  sample_values ARRAY<STRING>
+);
+
+-- Then manually run sampling for specific tables (example with a few tables)
+-- You'll need to generate these based on your actual table names
+
+INSERT INTO `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.table_column_samples`
+SELECT * FROM (
+  -- Table 1 samples
+  SELECT 
+    'prj-fisv-p-gcss-sas-d19dd0f1df' as project_id,
+    'CSIRT' as dataset_id,
+    'your_table_name_1' as table_name,
+    'column1' as column_name,
+    'STRING' as data_type,
+    ARRAY_AGG(CAST(column1 AS STRING) IGNORE NULLS LIMIT 5) as sample_values
+  FROM `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.your_table_name_1`
+  WHERE column1 IS NOT NULL
+  HAVING COUNT(*) > 0
+  
+  UNION ALL
+  
+  SELECT 
+    'prj-fisv-p-gcss-sas-d19dd0f1df' as project_id,
+    'CSIRT' as dataset_id,
+    'your_table_name_1' as table_name,
+    'column2' as column_name,
+    'INT64' as data_type,
+    ARRAY_AGG(CAST(column2 AS STRING) IGNORE NULLS LIMIT 5) as sample_values
+  FROM `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.your_table_name_1`
+  WHERE column2 IS NOT NULL
+  HAVING COUNT(*) > 0
+  
+  -- Continue for all columns and tables...
+);
+*/
+
+-- =============================================================================
+-- APPROACH 3: Schema overview without samples (fastest)
+-- =============================================================================
+
+/*
+-- Get a complete overview of all tables and their columns
+SELECT 
+  table_catalog as project_id,
+  table_schema as dataset_id,
+  table_name,
+  COUNT(*) as column_count,
+  STRING_AGG(
+    CONCAT(column_name, ' (', data_type, ')'), 
+    ', ' 
+    ORDER BY ordinal_position
+  ) as all_columns,
+  STRING_AGG(column_name, ', ' ORDER BY ordinal_position) as column_names_only
+FROM 
+  `prj-fisv-p-gcss-sas-d19dd0f1df.INFORMATION_SCHEMA.COLUMNS`
+WHERE 
+  table_schema NOT IN ('INFORMATION_SCHEMA', 'information_schema')
+GROUP BY 
+  table_catalog, table_schema, table_name
+ORDER BY 
+  project_id, dataset_id, table_name;
+*/
+
+-- =============================================================================
+-- APPROACH 4: Individual table sampling template
+-- =============================================================================
+
+/*
+-- Use this template for individual tables - replace table and column names
+WITH table_samples AS (
+  SELECT 
+    'prj-fisv-p-gcss-sas-d19dd0f1df' as project_id,
+    'CSIRT' as dataset_id,
+    'YOUR_TABLE_NAME' as table_name,
+    [
+      STRUCT('column1' as column_name, 'STRING' as data_type, 
+             ARRAY_AGG(CAST(column1 AS STRING) IGNORE NULLS LIMIT 5) as sample_values),
+      STRUCT('column2' as column_name, 'INT64' as data_type, 
+             ARRAY_AGG(CAST(column2 AS STRING) IGNORE NULLS LIMIT 5) as sample_values)
+      -- Add more columns as needed
+    ] as column_data
+  FROM `prj-fisv-p-gcss-sas-d19dd0f1df.CSIRT.YOUR_TABLE_NAME`
+)
+SELECT 
+  project_id,
+  dataset_id,
+  table_name,
+  col.column_name,
+  col.data_type,
+  col.sample_values
+FROM table_samples,
+UNNEST(column_data) as col;
+*/-- APPROACH 1A: Batch processing solution to avoid size limits
 -- Processes tables in smaller batches to avoid the 1MB script variable limit
 
 -- Create a permanent table to store results
