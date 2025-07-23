@@ -207,7 +207,7 @@ class BigQueryConnection:
                     logger.warning(f"Chronicle logging failed: {response.status_code}")
                     
         except Exception as e:
-            logger.debug(f"Chronicle logging error: {e}")
+            logger.debug(f"Activity logging failed: {e}")
     
     def run_bq_query(self, query, params=None):
         try:
