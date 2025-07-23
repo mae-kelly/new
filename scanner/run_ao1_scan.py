@@ -13,12 +13,11 @@ file_path = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, file_path)
 
 def check_environment_variables():
-    """Check all required environment variables are set"""
+    """Check environment variables like your working script"""
     print("🔍 Checking environment variables...")
     
     required_vars = {
         'Authentication': [
-            'FLASK_SECRET_KEY',
             'AUTHORITY', 
             'CLIENT_ID',
             'CLIENT_SECRET',
@@ -29,7 +28,6 @@ def check_environment_variables():
         'Chronicle': [
             'CHRONICLE_API_KEY',
             'CHRONICLE_SECRET_KEY', 
-            'CHRONICLE_FEED_ID',
             'CHRONICLE_ENDPOINT'
         ],
         'Network': [
@@ -38,30 +36,14 @@ def check_environment_variables():
         ]
     }
     
-    optional_vars = {
-        'SSL/TLS': [
-            'REQUESTS_CA_BUNDLE',
-            'CURL_CA_BUNDLE',
-            'SSL_CERT_FILE'
-        ],
-        'Redis': [
-            'REDIS_HOST',
-            'REDIS_PORT',
-            'REDIS_DB',
-            'REDIS_PASSWORD'
-        ]
-    }
-    
     issues = []
     warnings = []
     
-    # Check required variables
     for category, vars_list in required_vars.items():
         print(f"\n📋 {category} Configuration:")
         for var in vars_list:
             value = os.getenv(var)
             if value:
-                # Mask sensitive values
                 if any(secret in var.upper() for secret in ['SECRET', 'KEY', 'PASSWORD']):
                     display_value = f"{'*' * min(len(value), 8)}...({len(value)} chars)"
                 else:
@@ -69,27 +51,13 @@ def check_environment_variables():
                 print(f"   ✅ {var}: {display_value}")
             else:
                 print(f"   ❌ {var}: NOT SET")
-                issues.append(f"{var} is required for {category}")
-    
-    # Check optional variables
-    for category, vars_list in optional_vars.items():
-        print(f"\n📋 {category} Configuration (Optional):")
-        for var in vars_list:
-            value = os.getenv(var)
-            if value:
-                if any(secret in var.upper() for secret in ['SECRET', 'KEY', 'PASSWORD']):
-                    display_value = f"{'*' * min(len(value), 8)}...({len(value)} chars)"
+                if category in ['Authentication', 'Chronicle']:
+                    issues.append(f"{var} is required for {category}")
                 else:
-                    display_value = value[:50] + '...' if len(value) > 50 else value
-                print(f"   ✅ {var}: {display_value}")
-            else:
-                print(f"   ⚠️  {var}: NOT SET")
-                if category == 'Network' and var in ['HTTP_PROXY', 'HTTPS_PROXY']:
                     warnings.append(f"{var} not set - may be required for corporate network")
     
-    # Report status
     if issues:
-        print(f"\n❌ Configuration Issues Found:")
+        print(f"\n❌ Configuration Issues:")
         for issue in issues:
             print(f"   • {issue}")
         return False
@@ -102,13 +70,35 @@ def check_environment_variables():
     print(f"\n✅ Environment configuration looks good!")
     return True
 
+def test_bigquery_connection():
+    """Test BigQuery connection like your working script"""
+    print("\n🔗 Testing BigQuery connection...")
+    
+    SERVICE_ACCOUNT_FILE = os.path.join(file_path, "gcp_prod_key.json")
+    if not os.path.exists(SERVICE_ACCOUNT_FILE):
+        print(f"   ❌ Service account file not found: {SERVICE_ACCOUNT_FILE}")
+        return False
+    
+    try:
+        credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE)
+        project_id = "chronicle-fisv"  # Match your working script
+        client = bigquery.Client(project=project_id, credentials=credentials)
+        
+        datasets = list(client.list_datasets())
+        print(f"   ✅ Connected to project: {project_id}")
+        print(f"   ✅ Found {len(datasets)} datasets")
+        return True
+        
+    except Exception as e:
+        print(f"   ❌ BigQuery connection failed: {e}")
+        return False
+
 def test_corporate_connectivity():
     """Test corporate network connectivity"""
     print("\n🌐 Testing corporate network connectivity...")
     
     import requests
     
-    # Create session with environment proxy settings
     session = requests.Session()
     
     http_proxy = os.getenv('HTTP_PROXY')
@@ -121,19 +111,6 @@ def test_corporate_connectivity():
         }
         print(f"   🔧 Using proxy: {https_proxy or http_proxy}")
     
-    # Test Chronicle endpoint if configured
-    chronicle_endpoint = os.getenv('CHRONICLE_ENDPOINT')
-    if chronicle_endpoint:
-        try:
-            response = session.head(chronicle_endpoint, timeout=10)
-            if response.status_code < 500:
-                print(f"   ✅ Chronicle endpoint accessible: {chronicle_endpoint}")
-            else:
-                print(f"   ⚠️  Chronicle endpoint returned {response.status_code}: {chronicle_endpoint}")
-        except Exception as e:
-            print(f"   ❌ Chronicle endpoint failed: {str(e)[:60]}...")
-    
-    # Test model download domains
     test_domains = [
         'https://huggingface.co',
         'https://files.pythonhosted.org'
@@ -172,55 +149,40 @@ def main():
     # Reduce noise from certain modules
     logging.getLogger('urllib3').setLevel(logging.ERROR)
     logging.getLogger('requests').setLevel(logging.ERROR)
+    logging.getLogger('transformers').setLevel(logging.ERROR)
     
     logger = logging.getLogger(__name__)
     
-    print("🚀 AO1 BigQuery Semantic Scanner v2.0 - Environment Based")
+    print("🚀 AO1 BigQuery Semantic Scanner v2.0 - Fixed Connection")
     print("=" * 70)
     
     # Check environment configuration
     if not check_environment_variables():
         print("\n❌ Environment configuration incomplete")
         print("Please set the required environment variables and try again.")
-        print("\n💡 Example setup:")
-        print("export HTTP_PROXY=http://10.184.3.109:8080")
-        print("export HTTPS_PROXY=http://10.184.3.109:8080") 
-        print("export CHRONICLE_API_KEY=your_api_key")
-        print("export CLIENT_ID=your_client_id")
-        print("# ... (set other required variables)")
+        sys.exit(1)
+    
+    # Test BigQuery connection
+    if not test_bigquery_connection():
+        print("\n❌ BigQuery connection failed")
         sys.exit(1)
     
     # Test network connectivity
     test_corporate_connectivity()
     
-    # Check service account
-    SERVICE_ACCOUNT_FILE = os.path.join(file_path, "gcp_prod_key.json")
-    if not os.path.exists(SERVICE_ACCOUNT_FILE):
-        logger.error(f"❌ Service account file not found: {SERVICE_ACCOUNT_FILE}")
-        sys.exit(1)
-    
     try:
-        # Test BigQuery connection
-        print("\n🔗 Testing BigQuery connection...")
-        credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE)
-        project_id = "prj-fisv-p-gcss-sas-dl9dd0f1df"
-        client = bigquery.Client(project=project_id, credentials=credentials)
-        
-        datasets = list(client.list_datasets())
-        print(f"   ✅ Connected to project: {project_id}")
-        print(f"   ✅ Found {len(datasets)} datasets")
-        
-        # Initialize scanner with environment-based configuration
+        # Initialize scanner with fixed configuration
         print("\n🤖 Initializing AO1 semantic analyzer...")
         print("   📦 Loading AI models with corporate authentication...")
         print("   🔐 Using environment-based configuration...")
         
         from scanner import AO1Scanner
         
+        SERVICE_ACCOUNT_FILE = os.path.join(file_path, "gcp_prod_key.json")
+        scanner = AO1Scanner(service_account_path=SERVICE_ACCOUNT_FILE)
+        
+        # Get configuration summary
         try:
-            scanner = AO1Scanner(service_account_path=SERVICE_ACCOUNT_FILE)
-            
-            # Get configuration summary
             if hasattr(scanner.semantic_analyzer, 'embedding_manager') and \
                hasattr(scanner.semantic_analyzer.embedding_manager, 'foundation_models'):
                 config_summary = scanner.semantic_analyzer.embedding_manager.foundation_models.get_configuration_summary()
@@ -230,22 +192,12 @@ def main():
                 print(f"      • Authentication: {'✅' if config_summary['authentication_configured'] else '❌'}")
                 print(f"      • Chronicle: {'✅' if config_summary['chronicle_configured'] else '❌'}")
                 print(f"      • Proxy: {'✅' if config_summary['proxy_configured'] else '❌'}")
-                print(f"      • AI Models: {'✅' if config_summary['models_loaded'] else '❌'}")
+                print(f"      • AI Models: {'✅' if config_summary['models_loaded'] else '⚠️  Fallback'}")
             else:
                 print("   ✅ Scanner initialized!")
-            
         except Exception as e:
-            logger.error(f"❌ Scanner initialization failed: {e}")
-            print(f"\n🚨 Initialization failed!")
-            print(f"   Error: {str(e)[:100]}...")
-            print(f"\n🔧 Troubleshooting steps:")
-            print(f"   1. Verify all environment variables are set correctly")
-            print(f"   2. Test network connectivity to required domains")
-            print(f"   3. Check corporate firewall allows AI model downloads")
-            print(f"   4. Verify authentication credentials are valid")
-            print(f"   5. Check proxy configuration and certificates")
-            
-            sys.exit(1)
+            logger.debug(f"Configuration summary failed: {e}")
+            print("   ✅ Scanner initialized!")
         
         # Run the scan
         print("\n🔍 Starting comprehensive dataset scan...")
@@ -263,7 +215,7 @@ def main():
         metadata = results['scan_metadata']
         
         print(f"📊 Scan Results:")
-        print(f"   Project: {project_id}")
+        print(f"   Project: chronicle-fisv")
         print(f"   Datasets: {metadata['total_datasets']}")
         print(f"   Tables analyzed: {metadata['analyzed_tables']}")
         print(f"   Execution time: {metadata['execution_time_seconds']}s")
@@ -330,6 +282,15 @@ def main():
     except Exception as e:
         logger.error(f"❌ Scan failed: {e}")
         print(f"\n❌ Unexpected error: {e}")
+        
+        # Provide troubleshooting info
+        print(f"\n🔧 Troubleshooting steps:")
+        print(f"   1. Verify all environment variables are set correctly")
+        print(f"   2. Test network connectivity to required domains")
+        print(f"   3. Check corporate firewall allows AI model downloads")
+        print(f"   4. Verify authentication credentials are valid")
+        print(f"   5. Check proxy configuration and certificates")
+        
         sys.exit(1)
 
 if __name__ == "__main__":

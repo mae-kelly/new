@@ -3,31 +3,36 @@ import logging
 from pathlib import Path
 from google.cloud import bigquery
 from google.oauth2 import service_account
-from .config import PROJECT_ID, SERVICE_ACCOUNT_FILE
 
 logger = logging.getLogger(__name__)
 
 class BigQueryConnection:
     def __init__(self, service_account_path=None):
-        self.project_id = PROJECT_ID
+        self.project_id = "chronicle-fisv"  # Match your working script
         self.client = None
         self._connect(service_account_path)
     
     def _connect(self, service_account_path):
         try:
+            # Use the same pattern as your working script
             if service_account_path and os.path.exists(service_account_path):
-                SERVICE_ACCOUNT_FILE_PATH = service_account_path
+                SERVICE_ACCOUNT_FILE = service_account_path
             else:
+                # Look for the same file name as your working script
                 file_path = os.path.dirname(os.path.abspath(__file__))
                 parent_dir = os.path.dirname(file_path)
-                SERVICE_ACCOUNT_FILE_PATH = os.path.join(parent_dir, SERVICE_ACCOUNT_FILE)
+                SERVICE_ACCOUNT_FILE = os.path.join(parent_dir, "gcp_prod_key.json")
             
-            if not os.path.exists(SERVICE_ACCOUNT_FILE_PATH):
-                raise FileNotFoundError(f"Service account file not found: {SERVICE_ACCOUNT_FILE_PATH}")
+            if not os.path.exists(SERVICE_ACCOUNT_FILE):
+                raise FileNotFoundError(f"Service account file not found: {SERVICE_ACCOUNT_FILE}")
             
-            credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE_PATH)
+            # Use the exact same credential loading pattern
+            credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE)
+            
+            # Initialize client exactly like your working script
             self.client = bigquery.Client(project=self.project_id, credentials=credentials)
             
+            # Test connection the same way
             self._test_connection()
             logger.info(f"Connected to BigQuery project: {self.project_id}")
             
@@ -37,6 +42,7 @@ class BigQueryConnection:
     
     def _test_connection(self):
         try:
+            # Use same test pattern - list datasets
             datasets = list(self.client.list_datasets())
             logger.info(f"Connection test successful. Found {len(datasets)} datasets.")
         except Exception as e:
@@ -68,6 +74,7 @@ class BigQueryConnection:
             else:
                 field_list = '*'
             
+            # Use same query pattern as your working script
             query = f"""
                 SELECT {field_list}
                 FROM `{self.project_id}.{dataset_id}.{table_id}` TABLESAMPLE SYSTEM (0.1 PERCENT)
@@ -79,6 +86,7 @@ class BigQueryConnection:
         except Exception as e:
             logger.warning(f"Failed to sample data from {dataset_id}.{table_id}: {e}")
             try:
+                # Fallback without sampling
                 query = f"""
                     SELECT {field_list}
                     FROM `{self.project_id}.{dataset_id}.{table_id}`

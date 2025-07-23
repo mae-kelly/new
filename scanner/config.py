@@ -1,12 +1,31 @@
 import os
 from pathlib import Path
 
-PROJECT_ID = "prj-fisv-p-gcss-sas-dl9dd0f1df"
+# Match your working script's project ID
+PROJECT_ID = "chronicle-fisv"
 SERVICE_ACCOUNT_FILE = "gcp_prod_key.json"
 
 SEMANTIC_MODELS_CACHE = "./ao1_models"
 RESULTS_OUTPUT_DIR = "./ao1_results"
 
+# Environment-based configuration like your working script
+def get_env_config():
+    """Get configuration from environment variables like your working script"""
+    return {
+        'authority': os.getenv('AUTHORITY'),
+        'client_id': os.getenv('CLIENT_ID'), 
+        'client_secret': os.getenv('CLIENT_SECRET'),
+        'redirect_uri': os.getenv('REDIRECT_URI'),
+        'scope': os.getenv('SCOPE'),
+        'endpoint': os.getenv('ENDPOINT'),
+        'chronicle_api_key': os.getenv('CHRONICLE_API_KEY'),
+        'chronicle_secret_key': os.getenv('CHRONICLE_SECRET_KEY'),
+        'chronicle_endpoint': os.getenv('CHRONICLE_ENDPOINT'),
+        'http_proxy': os.getenv('HTTP_PROXY'),
+        'https_proxy': os.getenv('HTTPS_PROXY')
+    }
+
+# AO1 Concepts remain the same but optimized
 AO1_CONCEPTS = {
     'asset_identity': {
         'patterns': [

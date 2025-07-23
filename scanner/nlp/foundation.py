@@ -2,390 +2,512 @@
 
 import os
 import sys
-import socket
-import ssl
+import logging
 import requests
-import subprocess
-import json
+import numpy as np
+import warnings
 from pathlib import Path
-import time
 
-def print_header(title):
-    print(f"\n{'='*60}")
-    print(f"🔍 {title}")
-    print('='*60)
+# Suppress warnings
+warnings.filterwarnings('ignore')
 
-def print_section(title):
-    print(f"\n📋 {title}")
-    print('-'*40)
+logger = logging.getLogger(__name__)
 
-def test_basic_connectivity():
-    print_header("BASIC NETWORK CONNECTIVITY")
-    
-    # Test basic network
-    print_section("DNS Resolution")
-    domains_to_test = [
-        'google.com',
-        'huggingface.co', 
-        'pypi.org',
-        'nexia.1dc.com',
-        'lzf1pvap1560.1dc.com'
-    ]
-    
-    for domain in domains_to_test:
+class FoundationModels:
+    def __init__(self):
+        self.models_loaded = False
+        self.embedding_dimension = 384
+        self.config = self._load_environment_config()
+        
+        # Session configuration like your working script
+        self.session = self._create_session()
+        
         try:
-            ip = socket.gethostbyname(domain)
-            print(f"   ✅ {domain} -> {ip}")
+            self._initialize_models()
+            logger.info("Foundation models initialized successfully")
         except Exception as e:
-            print(f"   ❌ {domain} -> {e}")
+            logger.warning(f"Failed to initialize full models: {e}")
+            self._initialize_fallback()
     
-    # Test basic TCP connectivity
-    print_section("TCP Connectivity")
-    tcp_tests = [
-        ('google.com', 80),
-        ('google.com', 443),
-        ('10.184.3.109', 8080),  # Your proxy
-        ('nexia.1dc.com', 6379)  # Your Redis
-    ]
+    def _load_environment_config(self):
+        """Load configuration from environment variables like your working script"""
+        return {
+            'authority': os.getenv('AUTHORITY'),
+            'client_id': os.getenv('CLIENT_ID'),
+            'client_secret': os.getenv('CLIENT_SECRET'),
+            'chronicle_api_key': os.getenv('CHRONICLE_API_KEY'),
+            'chronicle_secret_key': os.getenv('CHRONICLE_SECRET_KEY'),
+            'chronicle_endpoint': os.getenv('CHRONICLE_ENDPOINT'),
+            'http_proxy': os.getenv('HTTP_PROXY'),
+            'https_proxy': os.getenv('HTTPS_PROXY'),
+            'authentication_configured': bool(os.getenv('CLIENT_ID')),
+            'chronicle_configured': bool(os.getenv('CHRONICLE_API_KEY')),
+            'proxy_configured': bool(os.getenv('HTTP_PROXY') or os.getenv('HTTPS_PROXY'))
+        }
     
-    for host, port in tcp_tests:
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(5)
-            result = sock.connect_ex((host, port))
-            sock.close()
-            
-            if result == 0:
-                print(f"   ✅ {host}:{port} - OPEN")
-            else:
-                print(f"   ❌ {host}:{port} - CLOSED/FILTERED")
-        except Exception as e:
-            print(f"   ❌ {host}:{port} - {e}")
-
-def test_proxy_configuration():
-    print_header("PROXY CONFIGURATION")
-    
-    # Check environment variables
-    print_section("Environment Variables")
-    proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'NO_PROXY', 'no_proxy']
-    
-    for var in proxy_vars:
-        value = os.getenv(var)
-        if value:
-            print(f"   ✅ {var}: {value}")
-        else:
-            print(f"   ⚠️  {var}: NOT SET")
-    
-    # Test proxy connectivity
-    print_section("Proxy Connectivity Test")
-    proxy = os.getenv('HTTPS_PROXY') or os.getenv('HTTP_PROXY')
-    
-    if proxy:
-        try:
-            # Test proxy with a simple request
-            session = requests.Session()
+    def _create_session(self):
+        """Create requests session with proxy configuration like your working script"""
+        session = requests.Session()
+        
+        # Configure proxy like your working script
+        if self.config['http_proxy'] or self.config['https_proxy']:
             session.proxies = {
-                'http': proxy,
-                'https': proxy
+                'http': self.config['http_proxy'],
+                'https': self.config['https_proxy']
             }
-            session.timeout = 10
+            logger.info(f"Using proxy: {self.config['https_proxy'] or self.config['http_proxy']}")
+        
+        # Set timeouts
+        session.timeout = 30
+        
+        # Configure SSL verification
+        ssl_cert_file = os.getenv('SSL_CERT_FILE') or os.getenv('REQUESTS_CA_BUNDLE')
+        if ssl_cert_file and os.path.exists(ssl_cert_file):
+            session.verify = ssl_cert_file
+            logger.info(f"Using SSL cert file: {ssl_cert_file}")
+        
+        return session
+    
+    def _initialize_models(self):
+        """Initialize models with corporate network support"""
+        try:
+            # Try to import and initialize sentence transformers
+            from sentence_transformers import SentenceTransformer
             
-            response = session.get('http://httpbin.org/ip', timeout=10)
-            if response.status_code == 200:
-                ip_info = response.json()
-                print(f"   ✅ Proxy working - External IP: {ip_info.get('origin', 'unknown')}")
+            # Use simple model that's more likely to download successfully
+            model_name = "all-MiniLM-L6-v2"
+            
+            # Configure environment for model download
+            if self.config['http_proxy']:
+                os.environ['HTTP_PROXY'] = self.config['http_proxy']
+                os.environ['HTTPS_PROXY'] = self.config['https_proxy'] or self.config['http_proxy']
+            
+            self.sentence_model = SentenceTransformer(model_name)
+            self.embedding_dimension = self.sentence_model.get_sentence_embedding_dimension()
+            
+            # Initialize other models
+            self._initialize_other_models()
+            
+            self.models_loaded = True
+            logger.info(f"Sentence transformer loaded successfully with dimension {self.embedding_dimension}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to load sentence transformers: {e}")
+            raise
+    
+    def _initialize_other_models(self):
+        """Initialize other NLP models with error handling"""
+        try:
+            # Try to initialize BERT and other models
+            from transformers import AutoTokenizer, AutoModel
+            
+            self.bert_tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
+            self.bert_model = AutoModel.from_pretrained('bert-base-uncased')
+            
+        except Exception as e:
+            logger.debug(f"Could not load transformers models: {e}")
+            self.bert_tokenizer = None
+            self.bert_model = None
+    
+    def _initialize_fallback(self):
+        """Initialize with fallback functionality if main models fail"""
+        logger.warning("Using fallback models - limited functionality")
+        
+        # Create simple embedding using basic text features
+        self.sentence_model = None
+        self.bert_model = None
+        self.bert_tokenizer = None
+        self.embedding_dimension = 100  # Reduced dimension for fallback
+        self.models_loaded = False
+    
+    def get_sentence_embedding(self, text, encoder_type='default'):
+        """Get sentence embedding with fallback"""
+        try:
+            if self.models_loaded and self.sentence_model:
+                embedding = self.sentence_model.encode(text)
+                return np.array(embedding)
             else:
-                print(f"   ❌ Proxy returned status: {response.status_code}")
+                # Fallback to simple embedding
+                return self._create_simple_embedding(text)
                 
         except Exception as e:
-            print(f"   ❌ Proxy test failed: {e}")
-            
-            # Try direct connection for comparison
-            try:
-                direct_response = requests.get('http://httpbin.org/ip', timeout=10)
-                if direct_response.status_code == 200:
-                    print(f"   ℹ️  Direct connection works (proxy may be blocking)")
-                else:
-                    print(f"   ℹ️  Direct connection also fails")
-            except:
-                print(f"   ℹ️  Direct connection also blocked")
-    else:
-        print("   ⚠️  No proxy configured")
-
-def test_ssl_certificates():
-    print_header("SSL CERTIFICATE CONFIGURATION")
+            logger.warning(f"Sentence embedding failed: {e}")
+            return self._create_simple_embedding(text)
     
-    # Find SSL certificates
-    print_section("Certificate Location")
-    current_file = Path(__file__)
-    
-    # Try different possible locations
-    possible_ssl_dirs = [
-        current_file.parent / 'ssl',
-        current_file.parent / '../ssl',
-        current_file.parent / '../../ssl', 
-        Path.cwd() / 'ssl',
-        Path.cwd() / '../ssl'
-    ]
-    
-    ssl_dir = None
-    for ssl_path in possible_ssl_dirs:
-        if ssl_path.exists():
-            ssl_dir = ssl_path
-            print(f"   ✅ Found SSL directory: {ssl_dir}")
-            break
-    
-    if not ssl_dir:
-        print(f"   ❌ SSL directory not found in any of these locations:")
-        for path in possible_ssl_dirs:
-            print(f"      - {path}")
-        return
-    
-    # Check certificate files
-    cert_file = ssl_dir / 'nexia.1dc.com.crt'
-    key_file = ssl_dir / 'nexia.1dc.com.key'
-    
-    print_section("Certificate Files")
-    
-    if cert_file.exists():
-        print(f"   ✅ Certificate found: {cert_file}")
-        
-        # Check certificate validity
+    def get_bert_embedding(self, text):
+        """Get BERT embedding with fallback"""
         try:
-            result = subprocess.run(['openssl', 'x509', '-in', str(cert_file), '-text', '-noout'], 
-                                  capture_output=True, text=True, timeout=10)
-            if result.returncode == 0:
-                print(f"   ✅ Certificate is valid")
+            if self.bert_model and self.bert_tokenizer:
+                import torch
                 
-                # Extract certificate info
-                cert_info = result.stdout
-                if 'nexia.1dc.com' in cert_info:
-                    print(f"   ✅ Certificate matches nexia.1dc.com")
-                else:
-                    print(f"   ⚠️  Certificate may not match nexia.1dc.com")
+                inputs = self.bert_tokenizer(text, return_tensors='pt', max_length=512, truncation=True)
+                with torch.no_grad():
+                    outputs = self.bert_model(**inputs)
+                    # Use [CLS] token embedding
+                    embedding = outputs.last_hidden_state[:, 0, :].squeeze().numpy()
                     
+                # Resize to match expected dimensions
+                if len(embedding) > self.embedding_dimension:
+                    embedding = embedding[:self.embedding_dimension]
+                elif len(embedding) < self.embedding_dimension:
+                    padding = np.zeros(self.embedding_dimension - len(embedding))
+                    embedding = np.concatenate([embedding, padding])
+                
+                return embedding
             else:
-                print(f"   ❌ Certificate validation failed: {result.stderr}")
-        except FileNotFoundError:
-            print(f"   ⚠️  OpenSSL not found - cannot validate certificate")
+                return self._create_simple_embedding(text)
+                
         except Exception as e:
-            print(f"   ⚠️  Certificate validation error: {e}")
-    else:
-        print(f"   ❌ Certificate not found: {cert_file}")
+            logger.warning(f"BERT embedding failed: {e}")
+            return self._create_simple_embedding(text)
     
-    if key_file.exists():
-        print(f"   ✅ Private key found: {key_file}")
-        
-        # Check key file permissions
-        stat_info = key_file.stat()
-        if stat_info.st_mode & 0o077:
-            print(f"   ⚠️  Key file permissions too open: {oct(stat_info.st_mode)}")
-        else:
-            print(f"   ✅ Key file permissions OK: {oct(stat_info.st_mode)}")
-    else:
-        print(f"   ❌ Private key not found: {key_file}")
-
-def test_environment_variables():
-    print_header("ENVIRONMENT VARIABLES")
-    
-    required_vars = {
-        'Authentication': ['CLIENT_ID', 'CLIENT_SECRET', 'AUTHORITY'],
-        'Chronicle': ['CHRONICLE_API_KEY', 'CHRONICLE_ENDPOINT'],
-        'Network': ['HTTP_PROXY', 'HTTPS_PROXY'],
-        'Optional': ['FLASK_SECRET_KEY', 'REDIRECT_URI', 'SCOPE']
-    }
-    
-    for category, vars_list in required_vars.items():
-        print_section(f"{category} Variables")
-        
-        for var in vars_list:
-            value = os.getenv(var)
-            if value:
-                # Mask sensitive values
-                if any(secret in var for secret in ['SECRET', 'KEY', 'PASSWORD']):
-                    masked_value = f"{'*' * 8}...({len(value)} chars)"
-                else:
-                    masked_value = value[:50] + '...' if len(value) > 50 else value
-                print(f"   ✅ {var}: {masked_value}")
-            else:
-                print(f"   ❌ {var}: NOT SET")
-
-def test_bigquery_connectivity():
-    print_header("BIGQUERY CONNECTIVITY")
-    
-    # Check service account file
-    print_section("Service Account File")
-    service_account_files = [
-        'gcp_prod_key.json',
-        './gcp_prod_key.json',
-        '../gcp_prod_key.json'
-    ]
-    
-    sa_file = None
-    for sa_path in service_account_files:
-        if os.path.exists(sa_path):
-            sa_file = sa_path
-            print(f"   ✅ Service account found: {sa_file}")
-            break
-    
-    if not sa_file:
-        print(f"   ❌ Service account file not found in:")
-        for path in service_account_files:
-            print(f"      - {path}")
-        return
-    
-    # Try to load and validate service account
-    try:
-        with open(sa_file, 'r') as f:
-            sa_data = json.load(f)
-        
-        required_fields = ['type', 'project_id', 'private_key_id', 'private_key', 'client_email']
-        missing_fields = [field for field in required_fields if field not in sa_data]
-        
-        if missing_fields:
-            print(f"   ❌ Service account missing fields: {missing_fields}")
-        else:
-            print(f"   ✅ Service account format valid")
-            print(f"   ✅ Project ID: {sa_data.get('project_id', 'unknown')}")
-            print(f"   ✅ Client email: {sa_data.get('client_email', 'unknown')}")
+    def _create_simple_embedding(self, text):
+        """Create simple fallback embedding"""
+        try:
+            # Simple hash-based embedding
+            import hashlib
             
-    except Exception as e:
-        print(f"   ❌ Service account file error: {e}")
-        return
-    
-    # Test BigQuery connection
-    print_section("BigQuery Connection Test")
-    try:
-        from google.cloud import bigquery
-        from google.oauth2 import service_account
-        
-        credentials = service_account.Credentials.from_service_account_file(sa_file)
-        project_id = "prj-fisv-p-gcss-sas-dl9dd0f1df"
-        
-        # Configure client with proxy if available
-        client = bigquery.Client(project=project_id, credentials=credentials)
-        
-        # Test connection
-        datasets = list(client.list_datasets())
-        print(f"   ✅ BigQuery connection successful!")
-        print(f"   ✅ Found {len(datasets)} datasets")
-        
-    except ImportError as e:
-        print(f"   ❌ Google Cloud libraries not installed: {e}")
-    except Exception as e:
-        print(f"   ❌ BigQuery connection failed: {e}")
-
-def test_python_imports():
-    print_header("PYTHON DEPENDENCIES")
-    
-    required_modules = [
-        'requests', 'numpy', 'torch', 'sklearn', 'google.cloud.bigquery',
-        'sentence_transformers', 'transformers'
-    ]
-    
-    for module in required_modules:
-        try:
-            __import__(module)
-            print(f"   ✅ {module}")
-        except ImportError as e:
-            print(f"   ❌ {module}: {e}")
-
-def test_model_download():
-    print_header("MODEL DOWNLOAD TEST")
-    
-    print_section("Testing Model Download URLs")
-    
-    # Create test session with proxy
-    session = requests.Session()
-    proxy = os.getenv('HTTPS_PROXY') or os.getenv('HTTP_PROXY')
-    
-    if proxy:
-        session.proxies = {'http': proxy, 'https': proxy}
-        print(f"   🔧 Using proxy: {proxy}")
-    
-    # Configure SSL if certificates exist
-    current_file = Path(__file__)
-    ssl_dirs = [current_file.parent / 'ssl', current_file.parent / '../ssl']
-    
-    for ssl_dir in ssl_dirs:
-        cert_file = ssl_dir / 'nexia.1dc.com.crt'
-        key_file = ssl_dir / 'nexia.1dc.com.key'
-        
-        if cert_file.exists() and key_file.exists():
-            session.cert = (str(cert_file), str(key_file))
-            session.verify = str(cert_file)
-            print(f"   🔒 Using SSL certificates: {cert_file}")
-            break
-    
-    # Test model download URLs
-    test_urls = [
-        'https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2',
-        'https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json',
-        'https://files.pythonhosted.org/packages/',
-        'https://pypi.org/simple/'
-    ]
-    
-    for url in test_urls:
-        try:
-            response = session.head(url, timeout=15)
-            if response.status_code < 400:
-                print(f"   ✅ {url}: {response.status_code}")
-            else:
-                print(f"   ⚠️  {url}: {response.status_code}")
+            # Create multiple hash features
+            features = []
+            
+            # Character frequency features
+            char_counts = {}
+            for char in text.lower():
+                if char.isalnum():
+                    char_counts[char] = char_counts.get(char, 0) + 1
+            
+            # Add top character frequencies (normalized)
+            total_chars = len(text)
+            for i in range(26):
+                char = chr(ord('a') + i)
+                freq = char_counts.get(char, 0) / max(total_chars, 1)
+                features.append(freq)
+            
+            # Text statistics
+            features.extend([
+                len(text) / 100.0,  # Length (normalized)
+                text.count(' ') / max(len(text), 1),  # Space ratio
+                text.count('.') / max(len(text), 1),  # Dot ratio
+                text.count('_') / max(len(text), 1),  # Underscore ratio
+                sum(1 for c in text if c.isupper()) / max(len(text), 1),  # Uppercase ratio
+                sum(1 for c in text if c.isdigit()) / max(len(text), 1),  # Digit ratio
+            ])
+            
+            # Hash features for semantic content
+            hash_obj = hashlib.md5(text.encode())
+            hash_bytes = hash_obj.digest()
+            
+            # Convert hash to features
+            hash_features = []
+            for byte in hash_bytes[:20]:  # Use first 20 bytes
+                hash_features.append(byte / 255.0)
+            
+            features.extend(hash_features)
+            
+            # Pad or truncate to desired dimension
+            while len(features) < self.embedding_dimension:
+                features.append(0.0)
+            
+            features = features[:self.embedding_dimension]
+            
+            return np.array(features, dtype=np.float32)
+            
         except Exception as e:
-            print(f"   ❌ {url}: {e}")
+            logger.warning(f"Simple embedding creation failed: {e}")
+            return np.zeros(self.embedding_dimension, dtype=np.float32)
+    
+    def get_configuration_summary(self):
+        """Get configuration summary for diagnostics"""
+        return {
+            'models_loaded': self.models_loaded,
+            'embedding_dimension': self.embedding_dimension,
+            'authentication_configured': self.config['authentication_configured'],
+            'chronicle_configured': self.config['chronicle_configured'],
+            'proxy_configured': self.config['proxy_configured'],
+            'has_sentence_model': self.sentence_model is not None,
+            'has_bert_model': self.bert_model is not None
+        }
+    
+    def test_connectivity(self):
+        """Test connectivity to required services"""
+        test_results = {}
+        
+        # Test Hugging Face
+        try:
+            response = self.session.head('https://huggingface.co', timeout=10)
+            test_results['huggingface'] = response.status_code < 400
+        except:
+            test_results['huggingface'] = False
+        
+        # Test PyPI
+        try:
+            response = self.session.head('https://pypi.org', timeout=10)
+            test_results['pypi'] = response.status_code < 400
+        except:
+            test_results['pypi'] = False
+        
+        # Test Chronicle if configured
+        if self.config['chronicle_endpoint']:
+            try:
+                response = self.session.head(self.config['chronicle_endpoint'], timeout=10)
+                test_results['chronicle'] = response.status_code < 500
+            except:
+                test_results['chronicle'] = False
+        
+        return test_results#!/usr/bin/env python3
 
-def generate_troubleshooting_report():
-    print_header("TROUBLESHOOTING RECOMMENDATIONS")
-    
-    # Analyze results and provide recommendations
-    proxy = os.getenv('HTTPS_PROXY') or os.getenv('HTTP_PROXY')
-    
-    if not proxy:
-        print("🔧 SET PROXY CONFIGURATION:")
-        print("   export HTTP_PROXY=http://10.184.3.109:8080")
-        print("   export HTTPS_PROXY=http://10.184.3.109:8080")
-    
-    if not os.getenv('CLIENT_ID'):
-        print("\n🔧 SET AUTHENTICATION VARIABLES:")
-        print("   export CLIENT_ID=your_client_id")
-        print("   export CLIENT_SECRET=your_client_secret")
-        print("   export CHRONICLE_API_KEY=your_api_key")
-    
-    print("\n🔧 COMMON SOLUTIONS:")
-    print("   1. Verify proxy allows HTTPS CONNECT method")
-    print("   2. Check firewall allows access to huggingface.co")
-    print("   3. Ensure SSL certificates are valid and readable")
-    print("   4. Verify service account has BigQuery permissions")
-    print("   5. Test network connectivity from this server")
-    
-    print("\n🔧 MANUAL TESTS:")
-    print("   # Test proxy:")
-    print("   curl -x http://10.184.3.109:8080 -v https://huggingface.co")
-    print("   ")
-    print("   # Test SSL certificates:")
-    print("   curl --cert ssl/nexia.1dc.com.crt --key ssl/nexia.1dc.com.key -v https://huggingface.co")
-    print("   ")
-    print("   # Test BigQuery:")
-    print("   gcloud auth activate-service-account --key-file=gcp_prod_key.json")
-    print("   gcloud projects list")
+import os
+import sys
+import logging
+import requests
+import numpy as np
+import warnings
+from pathlib import Path
 
-def main():
-    print("🏢 AO1 Scanner - Corporate Network Diagnostic Tool")
-    print("=" * 60)
-    print("This tool will diagnose connectivity issues in your corporate environment")
-    
-    test_basic_connectivity()
-    test_proxy_configuration()
-    test_ssl_certificates()
-    test_environment_variables()
-    test_python_imports()
-    test_bigquery_connectivity()
-    test_model_download()
-    generate_troubleshooting_report()
-    
-    print(f"\n🎯 DIAGNOSTIC COMPLETE")
-    print("Review the results above to identify connectivity issues.")
+# Suppress warnings
+warnings.filterwarnings('ignore')
 
-if __name__ == "__main__":
-    main()
+logger = logging.getLogger(__name__)
+
+class FoundationModels:
+    def __init__(self):
+        self.models_loaded = False
+        self.embedding_dimension = 384
+        self.config = self._load_environment_config()
+        
+        # Session configuration like your working script
+        self.session = self._create_session()
+        
+        try:
+            self._initialize_models()
+            logger.info("Foundation models initialized successfully")
+        except Exception as e:
+            logger.warning(f"Failed to initialize full models: {e}")
+            self._initialize_fallback()
+    
+    def _load_environment_config(self):
+        """Load configuration from environment variables like your working script"""
+        return {
+            'authority': os.getenv('AUTHORITY'),
+            'client_id': os.getenv('CLIENT_ID'),
+            'client_secret': os.getenv('CLIENT_SECRET'),
+            'chronicle_api_key': os.getenv('CHRONICLE_API_KEY'),
+            'chronicle_secret_key': os.getenv('CHRONICLE_SECRET_KEY'),
+            'chronicle_endpoint': os.getenv('CHRONICLE_ENDPOINT'),
+            'http_proxy': os.getenv('HTTP_PROXY'),
+            'https_proxy': os.getenv('HTTPS_PROXY'),
+            'authentication_configured': bool(os.getenv('CLIENT_ID')),
+            'chronicle_configured': bool(os.getenv('CHRONICLE_API_KEY')),
+            'proxy_configured': bool(os.getenv('HTTP_PROXY') or os.getenv('HTTPS_PROXY'))
+        }
+    
+    def _create_session(self):
+        """Create requests session with proxy configuration like your working script"""
+        session = requests.Session()
+        
+        # Configure proxy like your working script
+        if self.config['http_proxy'] or self.config['https_proxy']:
+            session.proxies = {
+                'http': self.config['http_proxy'],
+                'https': self.config['https_proxy']
+            }
+            logger.info(f"Using proxy: {self.config['https_proxy'] or self.config['http_proxy']}")
+        
+        # Set timeouts
+        session.timeout = 30
+        
+        # Configure SSL verification
+        ssl_cert_file = os.getenv('SSL_CERT_FILE') or os.getenv('REQUESTS_CA_BUNDLE')
+        if ssl_cert_file and os.path.exists(ssl_cert_file):
+            session.verify = ssl_cert_file
+            logger.info(f"Using SSL cert file: {ssl_cert_file}")
+        
+        return session
+    
+    def _initialize_models(self):
+        """Initialize models with corporate network support"""
+        try:
+            # Try to import and initialize sentence transformers
+            from sentence_transformers import SentenceTransformer
+            
+            # Use simple model that's more likely to download successfully
+            model_name = "all-MiniLM-L6-v2"
+            
+            # Configure environment for model download
+            if self.config['http_proxy']:
+                os.environ['HTTP_PROXY'] = self.config['http_proxy']
+                os.environ['HTTPS_PROXY'] = self.config['https_proxy'] or self.config['http_proxy']
+            
+            self.sentence_model = SentenceTransformer(model_name)
+            self.embedding_dimension = self.sentence_model.get_sentence_embedding_dimension()
+            
+            # Initialize other models
+            self._initialize_other_models()
+            
+            self.models_loaded = True
+            logger.info(f"Sentence transformer loaded successfully with dimension {self.embedding_dimension}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to load sentence transformers: {e}")
+            raise
+    
+    def _initialize_other_models(self):
+        """Initialize other NLP models with error handling"""
+        try:
+            # Try to initialize BERT and other models
+            from transformers import AutoTokenizer, AutoModel
+            
+            self.bert_tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
+            self.bert_model = AutoModel.from_pretrained('bert-base-uncased')
+            
+        except Exception as e:
+            logger.debug(f"Could not load transformers models: {e}")
+            self.bert_tokenizer = None
+            self.bert_model = None
+    
+    def _initialize_fallback(self):
+        """Initialize with fallback functionality if main models fail"""
+        logger.warning("Using fallback models - limited functionality")
+        
+        # Create simple embedding using basic text features
+        self.sentence_model = None
+        self.bert_model = None
+        self.bert_tokenizer = None
+        self.embedding_dimension = 100  # Reduced dimension for fallback
+        self.models_loaded = False
+    
+    def get_sentence_embedding(self, text, encoder_type='default'):
+        """Get sentence embedding with fallback"""
+        try:
+            if self.models_loaded and self.sentence_model:
+                embedding = self.sentence_model.encode(text)
+                return np.array(embedding)
+            else:
+                # Fallback to simple embedding
+                return self._create_simple_embedding(text)
+                
+        except Exception as e:
+            logger.warning(f"Sentence embedding failed: {e}")
+            return self._create_simple_embedding(text)
+    
+    def get_bert_embedding(self, text):
+        """Get BERT embedding with fallback"""
+        try:
+            if self.bert_model and self.bert_tokenizer:
+                import torch
+                
+                inputs = self.bert_tokenizer(text, return_tensors='pt', max_length=512, truncation=True)
+                with torch.no_grad():
+                    outputs = self.bert_model(**inputs)
+                    # Use [CLS] token embedding
+                    embedding = outputs.last_hidden_state[:, 0, :].squeeze().numpy()
+                    
+                # Resize to match expected dimensions
+                if len(embedding) > self.embedding_dimension:
+                    embedding = embedding[:self.embedding_dimension]
+                elif len(embedding) < self.embedding_dimension:
+                    padding = np.zeros(self.embedding_dimension - len(embedding))
+                    embedding = np.concatenate([embedding, padding])
+                
+                return embedding
+            else:
+                return self._create_simple_embedding(text)
+                
+        except Exception as e:
+            logger.warning(f"BERT embedding failed: {e}")
+            return self._create_simple_embedding(text)
+    
+    def _create_simple_embedding(self, text):
+        """Create simple fallback embedding"""
+        try:
+            # Simple hash-based embedding
+            import hashlib
+            
+            # Create multiple hash features
+            features = []
+            
+            # Character frequency features
+            char_counts = {}
+            for char in text.lower():
+                if char.isalnum():
+                    char_counts[char] = char_counts.get(char, 0) + 1
+            
+            # Add top character frequencies (normalized)
+            total_chars = len(text)
+            for i in range(26):
+                char = chr(ord('a') + i)
+                freq = char_counts.get(char, 0) / max(total_chars, 1)
+                features.append(freq)
+            
+            # Text statistics
+            features.extend([
+                len(text) / 100.0,  # Length (normalized)
+                text.count(' ') / max(len(text), 1),  # Space ratio
+                text.count('.') / max(len(text), 1),  # Dot ratio
+                text.count('_') / max(len(text), 1),  # Underscore ratio
+                sum(1 for c in text if c.isupper()) / max(len(text), 1),  # Uppercase ratio
+                sum(1 for c in text if c.isdigit()) / max(len(text), 1),  # Digit ratio
+            ])
+            
+            # Hash features for semantic content
+            hash_obj = hashlib.md5(text.encode())
+            hash_bytes = hash_obj.digest()
+            
+            # Convert hash to features
+            hash_features = []
+            for byte in hash_bytes[:20]:  # Use first 20 bytes
+                hash_features.append(byte / 255.0)
+            
+            features.extend(hash_features)
+            
+            # Pad or truncate to desired dimension
+            while len(features) < self.embedding_dimension:
+                features.append(0.0)
+            
+            features = features[:self.embedding_dimension]
+            
+            return np.array(features, dtype=np.float32)
+            
+        except Exception as e:
+            logger.warning(f"Simple embedding creation failed: {e}")
+            return np.zeros(self.embedding_dimension, dtype=np.float32)
+    
+    def get_configuration_summary(self):
+        """Get configuration summary for diagnostics"""
+        return {
+            'models_loaded': self.models_loaded,
+            'embedding_dimension': self.embedding_dimension,
+            'authentication_configured': self.config['authentication_configured'],
+            'chronicle_configured': self.config['chronicle_configured'],
+            'proxy_configured': self.config['proxy_configured'],
+            'has_sentence_model': self.sentence_model is not None,
+            'has_bert_model': self.bert_model is not None
+        }
+    
+    def test_connectivity(self):
+        """Test connectivity to required services"""
+        test_results = {}
+        
+        # Test Hugging Face
+        try:
+            response = self.session.head('https://huggingface.co', timeout=10)
+            test_results['huggingface'] = response.status_code < 400
+        except:
+            test_results['huggingface'] = False
+        
+        # Test PyPI
+        try:
+            response = self.session.head('https://pypi.org', timeout=10)
+            test_results['pypi'] = response.status_code < 400
+        except:
+            test_results['pypi'] = False
+        
+        # Test Chronicle if configured
+        if self.config['chronicle_endpoint']:
+            try:
+                response = self.session.head(self.config['chronicle_endpoint'], timeout=10)
+                test_results['chronicle'] = response.status_code < 500
+            except:
+                test_results['chronicle'] = False
+        
+        return test_results
