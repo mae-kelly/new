@@ -1,461 +1,391 @@
-import logging
-import torch
-import numpy as np
+#!/usr/bin/env python3
+
 import os
+import sys
+import socket
 import ssl
 import requests
-import certifi
+import subprocess
 import json
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-import urllib3
 from pathlib import Path
+import time
 
-logger = logging.getLogger(__name__)
+def print_header(title):
+    print(f"\n{'='*60}")
+    print(f"🔍 {title}")
+    print('='*60)
 
-class FoundationModels:
-    def __init__(self):
-        self.models = {}
-        self.tokenizers = {}
-        self.embedding_dimension = 384
-        self._setup_ssl_certificates()
-        self._load_environment_config()
-        self._configure_corporate_network()
-        self._initialize_models()
+def print_section(title):
+    print(f"\n📋 {title}")
+    print('-'*40)
+
+def test_basic_connectivity():
+    print_header("BASIC NETWORK CONNECTIVITY")
     
-    def _setup_ssl_certificates(self):
-        """Setup SSL certificates from the ssl folder"""
+    # Test basic network
+    print_section("DNS Resolution")
+    domains_to_test = [
+        'google.com',
+        'huggingface.co', 
+        'pypi.org',
+        'nexia.1dc.com',
+        'lzf1pvap1560.1dc.com'
+    ]
+    
+    for domain in domains_to_test:
         try:
-            # Get the current file location and navigate to ssl folder
-            current_file = Path(__file__)
-            # From scanner/nlp/foundation.py -> scanner/nlp -> scanner -> server -> ssl
-            server_dir = current_file.parent.parent.parent  # Go up to server directory
-            ssl_dir = server_dir.parent / 'ssl'  # Go up one more to find ssl folder
+            ip = socket.gethostbyname(domain)
+            print(f"   ✅ {domain} -> {ip}")
+        except Exception as e:
+            print(f"   ❌ {domain} -> {e}")
+    
+    # Test basic TCP connectivity
+    print_section("TCP Connectivity")
+    tcp_tests = [
+        ('google.com', 80),
+        ('google.com', 443),
+        ('10.184.3.109', 8080),  # Your proxy
+        ('nexia.1dc.com', 6379)  # Your Redis
+    ]
+    
+    for host, port in tcp_tests:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((host, port))
+            sock.close()
             
-            # SSL certificate paths
-            cert_file = ssl_dir / 'nexia.1dc.com.crt'
-            key_file = ssl_dir / 'nexia.1dc.com.key'
-            
-            if cert_file.exists() and key_file.exists():
-                self.ssl_cert_file = str(cert_file)
-                self.ssl_key_file = str(key_file)
-                
-                logger.info(f"✅ Found SSL certificate: {cert_file}")
-                logger.info(f"✅ Found SSL key: {key_file}")
-                
-                # Set environment variables for the certificates
-                os.environ['SSL_CERT_FILE'] = self.ssl_cert_file
-                os.environ['SSL_KEY_FILE'] = self.ssl_key_file
-                os.environ['REQUESTS_CA_BUNDLE'] = self.ssl_cert_file
-                
-                # Configure SSL context with the certificates
-                ssl_context = ssl.create_default_context()
-                ssl_context.load_cert_chain(self.ssl_cert_file, self.ssl_key_file)
-                ssl_context.check_hostname = False  # For corporate environment
-                ssl_context.verify_mode = ssl.CERT_NONE  # For corporate environment
-                
-                # Set as default context
-                ssl._create_default_https_context = lambda: ssl_context
-                
-                logger.info("✅ SSL certificates configured for nexia.1dc.com")
-                
+            if result == 0:
+                print(f"   ✅ {host}:{port} - OPEN")
             else:
-                logger.warning(f"⚠️  SSL certificates not found at {ssl_dir}")
-                logger.warning(f"   Expected: {cert_file}")
-                logger.warning(f"   Expected: {key_file}")
-                self.ssl_cert_file = None
-                self.ssl_key_file = None
-                
+                print(f"   ❌ {host}:{port} - CLOSED/FILTERED")
         except Exception as e:
-            logger.error(f"SSL certificate setup failed: {e}")
-            self.ssl_cert_file = None
-            self.ssl_key_file = None
+            print(f"   ❌ {host}:{port} - {e}")
+
+def test_proxy_configuration():
+    print_header("PROXY CONFIGURATION")
     
-    def _load_environment_config(self):
-        """Load all configuration from environment variables"""
-        
-        # Authentication configuration
-        self.auth_config = {
-            'flask_secret_key': os.getenv('FLASK_SECRET_KEY'),
-            'authority': os.getenv('AUTHORITY'),
-            'client_id': os.getenv('CLIENT_ID'),
-            'client_secret': os.getenv('CLIENT_SECRET'),
-            'redirect_uri': os.getenv('REDIRECT_URI'),
-            'scope': os.getenv('SCOPE'),
-            'endpoint': os.getenv('ENDPOINT')
-        }
-        
-        # Chronicle configuration
-        self.chronicle_config = {
-            'api_key': os.getenv('CHRONICLE_API_KEY'),
-            'secret_key': os.getenv('CHRONICLE_SECRET_KEY'),
-            'feed_id': os.getenv('CHRONICLE_FEED_ID'),
-            'endpoint': os.getenv('CHRONICLE_ENDPOINT')
-        }
-        
-        # Network configuration from environment
-        self.network_config = {
-            'http_proxy': os.getenv('HTTP_PROXY') or os.getenv('http_proxy'),
-            'https_proxy': os.getenv('HTTPS_PROXY') or os.getenv('https_proxy'),
-            'no_proxy': os.getenv('NO_PROXY') or os.getenv('no_proxy'),
-            'ca_bundle': os.getenv('REQUESTS_CA_BUNDLE') or os.getenv('CURL_CA_BUNDLE') or self.ssl_cert_file
-        }
-        
-        # Redis configuration (nexia.1dc.com from your environment)
-        self.redis_config = {
-            'host': os.getenv('REDIS_HOST', 'nexia.1dc.com'),
-            'port': int(os.getenv('REDIS_PORT', 6379)),
-            'db': int(os.getenv('REDIS_DB', 0)),
-            'password': os.getenv('REDIS_PASSWORD')
-        }
-        
-        # Log configuration status
-        self._log_config_status()
+    # Check environment variables
+    print_section("Environment Variables")
+    proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'NO_PROXY', 'no_proxy']
     
-    def _log_config_status(self):
-        """Log configuration status without exposing secrets"""
-        logger.info("Loading environment configuration...")
-        
-        # Check SSL certs
-        ssl_configured = bool(self.ssl_cert_file and self.ssl_key_file)
-        logger.info(f"✅ SSL Certificates: {'CONFIGURED (nexia.1dc.com)' if ssl_configured else 'NOT FOUND'}")
-        
-        # Check auth config
-        auth_configured = all([
-            self.auth_config['authority'],
-            self.auth_config['client_id'],
-            self.auth_config['client_secret']
-        ])
-        logger.info(f"✅ Authentication config: {'CONFIGURED' if auth_configured else 'MISSING'}")
-        
-        # Check Chronicle config
-        chronicle_configured = all([
-            self.chronicle_config['api_key'],
-            self.chronicle_config['endpoint']
-        ])
-        logger.info(f"✅ Chronicle config: {'CONFIGURED' if chronicle_configured else 'MISSING'}")
-        
-        # Check network config
-        proxy_configured = bool(self.network_config['http_proxy'])
-        logger.info(f"✅ Proxy config: {'CONFIGURED' if proxy_configured else 'NOT SET'}")
-        
-        # Check Redis
-        logger.info(f"✅ Redis backend: {self.redis_config['host']}:{self.redis_config['port']}")
+    for var in proxy_vars:
+        value = os.getenv(var)
+        if value:
+            print(f"   ✅ {var}: {value}")
+        else:
+            print(f"   ⚠️  {var}: NOT SET")
     
-    def _configure_corporate_network(self):
-        """Configure corporate network settings from environment"""
+    # Test proxy connectivity
+    print_section("Proxy Connectivity Test")
+    proxy = os.getenv('HTTPS_PROXY') or os.getenv('HTTP_PROXY')
+    
+    if proxy:
         try:
-            logger.info("Configuring corporate network from environment variables...")
+            # Test proxy with a simple request
+            session = requests.Session()
+            session.proxies = {
+                'http': proxy,
+                'https': proxy
+            }
+            session.timeout = 10
             
-            # Configure proxy if available
-            if self.network_config['http_proxy'] and self.network_config['https_proxy']:
-                self.proxies = {
-                    'http': self.network_config['http_proxy'],
-                    'https': self.network_config['https_proxy']
-                }
-                logger.info(f"✅ Proxy configured: {self.network_config['http_proxy']}")
+            response = session.get('http://httpbin.org/ip', timeout=10)
+            if response.status_code == 200:
+                ip_info = response.json()
+                print(f"   ✅ Proxy working - External IP: {ip_info.get('origin', 'unknown')}")
             else:
-                self.proxies = {}
-                logger.info("⚠️  No proxy configuration found in environment")
-            
-            # Setup authenticated session with SSL certificates
-            self._setup_authenticated_session()
-            
-        except Exception as e:
-            logger.error(f"Corporate network configuration failed: {e}")
-            raise
-    
-    def _setup_authenticated_session(self):
-        """Setup requests session with SSL certificates and authentication"""
-        try:
-            # Create session with corporate configuration
-            self.session = requests.Session()
-            
-            # Configure retry strategy
-            retry_strategy = Retry(
-                total=5,
-                backoff_factor=2,
-                status_forcelist=[429, 500, 502, 503, 504],
-                allowed_methods=["HEAD", "GET", "OPTIONS", "POST"]
-            )
-            
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-            self.session.mount("http://", adapter)
-            self.session.mount("https://", adapter)
-            
-            # Configure proxy from environment
-            if self.proxies:
-                self.session.proxies = self.proxies
-            
-            # Configure SSL with nexia.1dc.com certificates
-            if self.ssl_cert_file and self.ssl_key_file:
-                # Use the SSL certificates for client authentication
-                self.session.cert = (self.ssl_cert_file, self.ssl_key_file)
-                self.session.verify = self.ssl_cert_file  # Use cert as CA bundle too
-                logger.info("✅ SSL client certificates configured")
-            elif self.network_config['ca_bundle'] and os.path.exists(self.network_config['ca_bundle']):
-                self.session.verify = self.network_config['ca_bundle']
-                logger.info(f"✅ CA bundle configured: {self.network_config['ca_bundle']}")
-            
-            # Set timeouts
-            self.session.timeout = (30, 120)
-            
-            # Add authentication headers if Chronicle is configured
-            if self.chronicle_config['api_key']:
-                self.session.headers.update({
-                    'X-goog-apikey': self.chronicle_config['api_key']
-                })
+                print(f"   ❌ Proxy returned status: {response.status_code}")
                 
-                if self.chronicle_config['secret_key']:
-                    self.session.headers.update({
-                        'X-Webhook-Access-Key': self.chronicle_config['secret_key']
-                    })
-            
-            # Add User-Agent for nexia.1dc.com environment
-            self.session.headers.update({
-                'User-Agent': 'AO1-Scanner/2.0 (nexia.1dc.com)',
-                'X-Client-Domain': 'nexia.1dc.com'
-            })
-            
-            # Add client authentication if configured
-            if self.auth_config['client_id']:
-                self.session.headers.update({
-                    'X-Client-ID': self.auth_config['client_id']
-                })
-            
-            logger.info("✅ Authenticated session configured with SSL certificates")
-            
-            # Test connectivity with certificates
-            self._test_ssl_connectivity()
-            
-            # Patch transformers to use SSL certificates
-            self._patch_transformers_with_ssl()
-            
         except Exception as e:
-            logger.error(f"Authenticated session setup failed: {e}")
-            raise
+            print(f"   ❌ Proxy test failed: {e}")
+            
+            # Try direct connection for comparison
+            try:
+                direct_response = requests.get('http://httpbin.org/ip', timeout=10)
+                if direct_response.status_code == 200:
+                    print(f"   ℹ️  Direct connection works (proxy may be blocking)")
+                else:
+                    print(f"   ℹ️  Direct connection also fails")
+            except:
+                print(f"   ℹ️  Direct connection also blocked")
+    else:
+        print("   ⚠️  No proxy configured")
+
+def test_ssl_certificates():
+    print_header("SSL CERTIFICATE CONFIGURATION")
     
-    def _test_ssl_connectivity(self):
-        """Test SSL connectivity with nexia.1dc.com certificates"""
+    # Find SSL certificates
+    print_section("Certificate Location")
+    current_file = Path(__file__)
+    
+    # Try different possible locations
+    possible_ssl_dirs = [
+        current_file.parent / 'ssl',
+        current_file.parent / '../ssl',
+        current_file.parent / '../../ssl', 
+        Path.cwd() / 'ssl',
+        Path.cwd() / '../ssl'
+    ]
+    
+    ssl_dir = None
+    for ssl_path in possible_ssl_dirs:
+        if ssl_path.exists():
+            ssl_dir = ssl_path
+            print(f"   ✅ Found SSL directory: {ssl_dir}")
+            break
+    
+    if not ssl_dir:
+        print(f"   ❌ SSL directory not found in any of these locations:")
+        for path in possible_ssl_dirs:
+            print(f"      - {path}")
+        return
+    
+    # Check certificate files
+    cert_file = ssl_dir / 'nexia.1dc.com.crt'
+    key_file = ssl_dir / 'nexia.1dc.com.key'
+    
+    print_section("Certificate Files")
+    
+    if cert_file.exists():
+        print(f"   ✅ Certificate found: {cert_file}")
+        
+        # Check certificate validity
         try:
-            logger.info("Testing SSL connectivity with nexia.1dc.com certificates...")
-            
-            # Test internal connectivity first
-            internal_urls = []
-            if self.chronicle_config['endpoint']:
-                internal_urls.append(self.chronicle_config['endpoint'])
-            
-            # Test external connectivity for model downloads
-            external_urls = [
-                'https://httpbin.org/status/200',
-                'https://huggingface.co'
-            ]
-            
-            # Test internal endpoints
-            for url in internal_urls:
-                try:
-                    response = self.session.head(url, timeout=10)
-                    if response.status_code < 400:
-                        logger.info(f"✅ Internal SSL connectivity: {url}")
-                    else:
-                        logger.warning(f"⚠️  Internal endpoint returned {response.status_code}: {url}")
-                except Exception as e:
-                    logger.warning(f"⚠️  Internal SSL test failed for {url}: {e}")
-            
-            # Test external endpoints
-            for url in external_urls:
-                try:
-                    response = self.session.head(url, timeout=10)
-                    if response.status_code < 400:
-                        logger.info(f"✅ External SSL connectivity: {url}")
-                    else:
-                        logger.warning(f"⚠️  External endpoint returned {response.status_code}: {url}")
-                except Exception as e:
-                    logger.debug(f"External SSL test failed for {url}: {e}")
-            
-        except Exception as e:
-            logger.debug(f"SSL connectivity test failed: {e}")
-    
-    def _patch_transformers_with_ssl(self):
-        """Patch transformers library to use SSL certificates"""
-        try:
-            import sentence_transformers.util
-            
-            # Store original function
-            original_http_get = getattr(sentence_transformers.util, 'http_get', None)
-            
-            def ssl_authenticated_http_get(url, temp_file, proxies=None, resume_size=0, headers=None):
-                """Download using SSL certificates and corporate authentication"""
-                try:
-                    logger.info(f"Downloading via nexia.1dc.com SSL: {url}")
-                    
-                    # Use SSL-configured session for downloads
-                    download_headers = headers or {}
-                    if resume_size > 0:
-                        download_headers['Range'] = f'bytes={resume_size}-'
-                    
-                    # Add client authentication headers
-                    if self.auth_config['client_id']:
-                        download_headers['X-Client-ID'] = self.auth_config['client_id']
-                        download_headers['X-Client-Domain'] = 'nexia.1dc.com'
-                    
-                    response = self.session.get(url, headers=download_headers, stream=True)
-                    response.raise_for_status()
-                    
-                    # Write to file
-                    with open(temp_file, 'ab' if resume_size > 0 else 'wb') as f:
-                        for chunk in response.iter_content(chunk_size=8192):
-                            if chunk:
-                                f.write(chunk)
-                    
-                    logger.info("✅ Download completed via nexia.1dc.com SSL")
-                    return temp_file
-                    
-                except Exception as e:
-                    logger.error(f"SSL download failed: {e}")
-                    
-                    # Fallback to original function
-                    if original_http_get:
-                        logger.info("Attempting fallback download without SSL...")
-                        return original_http_get(url, temp_file, proxies, resume_size, headers)
-                    raise
-            
-            # Apply SSL patch
-            if hasattr(sentence_transformers.util, 'http_get'):
-                sentence_transformers.util.http_get = ssl_authenticated_http_get
-                logger.info("✅ Transformers patched for nexia.1dc.com SSL")
-            
-        except ImportError:
-            logger.debug("Transformers not imported yet - will patch on demand")
-        except Exception as e:
-            logger.warning(f"Failed to patch transformers with SSL: {e}")
-    
-    def _initialize_models(self):
-        """Initialize models with SSL certificates and corporate authentication"""
-        try:
-            logger.info("Initializing sentence transformers with nexia.1dc.com SSL certificates...")
-            
-            # Import after SSL configuration
-            from sentence_transformers import SentenceTransformer
-            
-            # Ensure SSL patches are applied
-            self._patch_transformers_with_ssl()
-            
-            # Download models using SSL certificates
-            logger.info("Downloading models via nexia.1dc.com SSL...")
-            self.models['sentence_transformer'] = SentenceTransformer(
-                'all-MiniLM-L6-v2',
-                cache_folder=os.path.expanduser('~/.cache/sentence_transformers_nexia')
-            )
-            
-            # Use same model for consistency
-            self.models['domain_encoder'] = self.models['sentence_transformer']
-            self.models['code_encoder'] = self.models['sentence_transformer']
-            
-            # Test model functionality
-            test_embedding = self.models['sentence_transformer'].encode(["nexia ssl test"])
-            self.embedding_dimension = test_embedding.shape[1]
-            
-            logger.info(f"✅ Models initialized successfully!")
-            logger.info(f"   Model: all-MiniLM-L6-v2")
-            logger.info(f"   Embedding dimension: {self.embedding_dimension}")
-            logger.info(f"   SSL certificates: {'ENABLED (nexia.1dc.com)' if self.ssl_cert_file else 'DISABLED'}")
-            logger.info(f"   Corporate authentication: {'ENABLED' if self.chronicle_config['api_key'] else 'DISABLED'}")
-            
-        except Exception as e:
-            logger.error(f"❌ Model initialization failed: {e}")
-            logger.error("Possible issues:")
-            logger.error("  • Corporate firewall blocking model downloads")
-            logger.error("  • SSL certificate authentication failed")
-            logger.error("  • nexia.1dc.com certificates invalid or expired")
-            logger.error("  • Proxy configuration incorrect")
-            logger.error("  • Network connectivity issues")
-            
-            # Provide SSL-specific troubleshooting
-            self._provide_ssl_troubleshooting()
-            raise
-    
-    def _provide_ssl_troubleshooting(self):
-        """Provide SSL-specific troubleshooting"""
-        logger.error("\n🔧 SSL TROUBLESHOOTING:")
-        
-        # Check certificates exist
-        if self.ssl_cert_file and self.ssl_key_file:
-            logger.error(f"1. SSL CERTIFICATES: ✅ FOUND")
-            logger.error(f"   Certificate: {self.ssl_cert_file}")
-            logger.error(f"   Key: {self.ssl_key_file}")
-        else:
-            logger.error("1. SSL CERTIFICATES: ❌ NOT FOUND")
-            logger.error("   Expected in ../ssl/ directory relative to scanner")
-        
-        # Check environment variables
-        missing_vars = []
-        for key, value in self.auth_config.items():
-            if not value and key != 'flask_secret_key':
-                missing_vars.append(key.upper())
-        
-        if missing_vars:
-            logger.error(f"2. MISSING ENV VARS: {', '.join(missing_vars)}")
-        else:
-            logger.error("2. ENVIRONMENT VARIABLES: ✅ CONFIGURED")
-        
-        # Check proxy
-        if not self.network_config['http_proxy']:
-            logger.error("3. PROXY: ❌ NOT CONFIGURED")
-        else:
-            logger.error("3. PROXY: ✅ CONFIGURED")
-        
-        logger.error("4. TEST SSL MANUALLY:")
-        logger.error(f"   curl --cert {self.ssl_cert_file} --key {self.ssl_key_file} -v https://huggingface.co")
-        
-        logger.error("5. VERIFY CERTIFICATE VALIDITY:")
-        logger.error(f"   openssl x509 -in {self.ssl_cert_file} -text -noout")
-    
-    def get_sentence_embedding(self, text, model_type='sentence_transformer'):
-        """Get sentence embedding using SSL-configured models"""
-        try:
-            model = self.models.get(model_type)
-            if model:
-                embedding = model.encode([text])[0]
+            result = subprocess.run(['openssl', 'x509', '-in', str(cert_file), '-text', '-noout'], 
+                                  capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                print(f"   ✅ Certificate is valid")
                 
-                # Ensure consistent dimensionality
-                if len(embedding) != self.embedding_dimension:
-                    if len(embedding) < self.embedding_dimension:
-                        padding = np.zeros(self.embedding_dimension - len(embedding))
-                        embedding = np.concatenate([embedding, padding])
-                    else:
-                        embedding = embedding[:self.embedding_dimension]
-                
-                return embedding
+                # Extract certificate info
+                cert_info = result.stdout
+                if 'nexia.1dc.com' in cert_info:
+                    print(f"   ✅ Certificate matches nexia.1dc.com")
+                else:
+                    print(f"   ⚠️  Certificate may not match nexia.1dc.com")
+                    
             else:
-                logger.error("Model not available")
-                raise RuntimeError("Models not properly initialized")
-                
+                print(f"   ❌ Certificate validation failed: {result.stderr}")
+        except FileNotFoundError:
+            print(f"   ⚠️  OpenSSL not found - cannot validate certificate")
         except Exception as e:
-            logger.error(f"Failed to get embedding: {e}")
-            raise
+            print(f"   ⚠️  Certificate validation error: {e}")
+    else:
+        print(f"   ❌ Certificate not found: {cert_file}")
     
-    def get_bert_embedding(self, text):
-        """Get BERT-style embedding"""
-        return self.get_sentence_embedding(text, 'sentence_transformer')
+    if key_file.exists():
+        print(f"   ✅ Private key found: {key_file}")
+        
+        # Check key file permissions
+        stat_info = key_file.stat()
+        if stat_info.st_mode & 0o077:
+            print(f"   ⚠️  Key file permissions too open: {oct(stat_info.st_mode)}")
+        else:
+            print(f"   ✅ Key file permissions OK: {oct(stat_info.st_mode)}")
+    else:
+        print(f"   ❌ Private key not found: {key_file}")
+
+def test_environment_variables():
+    print_header("ENVIRONMENT VARIABLES")
     
-    def get_roberta_embedding(self, text):
-        """Get RoBERTa-style embedding"""
-        return self.get_sentence_embedding(text, 'sentence_transformer')
+    required_vars = {
+        'Authentication': ['CLIENT_ID', 'CLIENT_SECRET', 'AUTHORITY'],
+        'Chronicle': ['CHRONICLE_API_KEY', 'CHRONICLE_ENDPOINT'],
+        'Network': ['HTTP_PROXY', 'HTTPS_PROXY'],
+        'Optional': ['FLASK_SECRET_KEY', 'REDIRECT_URI', 'SCOPE']
+    }
     
-    def is_fallback_mode(self):
-        """Check if running in fallback mode"""
-        return False  # We use proper SSL certificates and authentication
+    for category, vars_list in required_vars.items():
+        print_section(f"{category} Variables")
+        
+        for var in vars_list:
+            value = os.getenv(var)
+            if value:
+                # Mask sensitive values
+                if any(secret in var for secret in ['SECRET', 'KEY', 'PASSWORD']):
+                    masked_value = f"{'*' * 8}...({len(value)} chars)"
+                else:
+                    masked_value = value[:50] + '...' if len(value) > 50 else value
+                print(f"   ✅ {var}: {masked_value}")
+            else:
+                print(f"   ❌ {var}: NOT SET")
+
+def test_bigquery_connectivity():
+    print_header("BIGQUERY CONNECTIVITY")
     
-    def get_configuration_summary(self):
-        """Get summary of current configuration for debugging"""
-        return {
-            'ssl_certificates_configured': bool(self.ssl_cert_file and self.ssl_key_file),
-            'authentication_configured': bool(self.auth_config['client_id']),
-            'chronicle_configured': bool(self.chronicle_config['api_key']),
-            'proxy_configured': bool(self.network_config['http_proxy']),
-            'models_loaded': bool(self.models.get('sentence_transformer')),
-            'embedding_dimension': self.embedding_dimension,
-            'ssl_cert_path': self.ssl_cert_file,
-            'redis_host': self.redis_config['host']
-        }
+    # Check service account file
+    print_section("Service Account File")
+    service_account_files = [
+        'gcp_prod_key.json',
+        './gcp_prod_key.json',
+        '../gcp_prod_key.json'
+    ]
+    
+    sa_file = None
+    for sa_path in service_account_files:
+        if os.path.exists(sa_path):
+            sa_file = sa_path
+            print(f"   ✅ Service account found: {sa_file}")
+            break
+    
+    if not sa_file:
+        print(f"   ❌ Service account file not found in:")
+        for path in service_account_files:
+            print(f"      - {path}")
+        return
+    
+    # Try to load and validate service account
+    try:
+        with open(sa_file, 'r') as f:
+            sa_data = json.load(f)
+        
+        required_fields = ['type', 'project_id', 'private_key_id', 'private_key', 'client_email']
+        missing_fields = [field for field in required_fields if field not in sa_data]
+        
+        if missing_fields:
+            print(f"   ❌ Service account missing fields: {missing_fields}")
+        else:
+            print(f"   ✅ Service account format valid")
+            print(f"   ✅ Project ID: {sa_data.get('project_id', 'unknown')}")
+            print(f"   ✅ Client email: {sa_data.get('client_email', 'unknown')}")
+            
+    except Exception as e:
+        print(f"   ❌ Service account file error: {e}")
+        return
+    
+    # Test BigQuery connection
+    print_section("BigQuery Connection Test")
+    try:
+        from google.cloud import bigquery
+        from google.oauth2 import service_account
+        
+        credentials = service_account.Credentials.from_service_account_file(sa_file)
+        project_id = "prj-fisv-p-gcss-sas-dl9dd0f1df"
+        
+        # Configure client with proxy if available
+        client = bigquery.Client(project=project_id, credentials=credentials)
+        
+        # Test connection
+        datasets = list(client.list_datasets())
+        print(f"   ✅ BigQuery connection successful!")
+        print(f"   ✅ Found {len(datasets)} datasets")
+        
+    except ImportError as e:
+        print(f"   ❌ Google Cloud libraries not installed: {e}")
+    except Exception as e:
+        print(f"   ❌ BigQuery connection failed: {e}")
+
+def test_python_imports():
+    print_header("PYTHON DEPENDENCIES")
+    
+    required_modules = [
+        'requests', 'numpy', 'torch', 'sklearn', 'google.cloud.bigquery',
+        'sentence_transformers', 'transformers'
+    ]
+    
+    for module in required_modules:
+        try:
+            __import__(module)
+            print(f"   ✅ {module}")
+        except ImportError as e:
+            print(f"   ❌ {module}: {e}")
+
+def test_model_download():
+    print_header("MODEL DOWNLOAD TEST")
+    
+    print_section("Testing Model Download URLs")
+    
+    # Create test session with proxy
+    session = requests.Session()
+    proxy = os.getenv('HTTPS_PROXY') or os.getenv('HTTP_PROXY')
+    
+    if proxy:
+        session.proxies = {'http': proxy, 'https': proxy}
+        print(f"   🔧 Using proxy: {proxy}")
+    
+    # Configure SSL if certificates exist
+    current_file = Path(__file__)
+    ssl_dirs = [current_file.parent / 'ssl', current_file.parent / '../ssl']
+    
+    for ssl_dir in ssl_dirs:
+        cert_file = ssl_dir / 'nexia.1dc.com.crt'
+        key_file = ssl_dir / 'nexia.1dc.com.key'
+        
+        if cert_file.exists() and key_file.exists():
+            session.cert = (str(cert_file), str(key_file))
+            session.verify = str(cert_file)
+            print(f"   🔒 Using SSL certificates: {cert_file}")
+            break
+    
+    # Test model download URLs
+    test_urls = [
+        'https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2',
+        'https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json',
+        'https://files.pythonhosted.org/packages/',
+        'https://pypi.org/simple/'
+    ]
+    
+    for url in test_urls:
+        try:
+            response = session.head(url, timeout=15)
+            if response.status_code < 400:
+                print(f"   ✅ {url}: {response.status_code}")
+            else:
+                print(f"   ⚠️  {url}: {response.status_code}")
+        except Exception as e:
+            print(f"   ❌ {url}: {e}")
+
+def generate_troubleshooting_report():
+    print_header("TROUBLESHOOTING RECOMMENDATIONS")
+    
+    # Analyze results and provide recommendations
+    proxy = os.getenv('HTTPS_PROXY') or os.getenv('HTTP_PROXY')
+    
+    if not proxy:
+        print("🔧 SET PROXY CONFIGURATION:")
+        print("   export HTTP_PROXY=http://10.184.3.109:8080")
+        print("   export HTTPS_PROXY=http://10.184.3.109:8080")
+    
+    if not os.getenv('CLIENT_ID'):
+        print("\n🔧 SET AUTHENTICATION VARIABLES:")
+        print("   export CLIENT_ID=your_client_id")
+        print("   export CLIENT_SECRET=your_client_secret")
+        print("   export CHRONICLE_API_KEY=your_api_key")
+    
+    print("\n🔧 COMMON SOLUTIONS:")
+    print("   1. Verify proxy allows HTTPS CONNECT method")
+    print("   2. Check firewall allows access to huggingface.co")
+    print("   3. Ensure SSL certificates are valid and readable")
+    print("   4. Verify service account has BigQuery permissions")
+    print("   5. Test network connectivity from this server")
+    
+    print("\n🔧 MANUAL TESTS:")
+    print("   # Test proxy:")
+    print("   curl -x http://10.184.3.109:8080 -v https://huggingface.co")
+    print("   ")
+    print("   # Test SSL certificates:")
+    print("   curl --cert ssl/nexia.1dc.com.crt --key ssl/nexia.1dc.com.key -v https://huggingface.co")
+    print("   ")
+    print("   # Test BigQuery:")
+    print("   gcloud auth activate-service-account --key-file=gcp_prod_key.json")
+    print("   gcloud projects list")
+
+def main():
+    print("🏢 AO1 Scanner - Corporate Network Diagnostic Tool")
+    print("=" * 60)
+    print("This tool will diagnose connectivity issues in your corporate environment")
+    
+    test_basic_connectivity()
+    test_proxy_configuration()
+    test_ssl_certificates()
+    test_environment_variables()
+    test_python_imports()
+    test_bigquery_connectivity()
+    test_model_download()
+    generate_troubleshooting_report()
+    
+    print(f"\n🎯 DIAGNOSTIC COMPLETE")
+    print("Review the results above to identify connectivity issues.")
+
+if __name__ == "__main__":
+    main()
