@@ -12,117 +12,142 @@ from google.oauth2 import service_account
 file_path = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, file_path)
 
-def check_corporate_environment():
-    """Check and validate corporate environment setup"""
-    print("🏢 Checking corporate environment configuration...")
+def check_environment_variables():
+    """Check all required environment variables are set"""
+    print("🔍 Checking environment variables...")
+    
+    required_vars = {
+        'Authentication': [
+            'FLASK_SECRET_KEY',
+            'AUTHORITY', 
+            'CLIENT_ID',
+            'CLIENT_SECRET',
+            'REDIRECT_URI',
+            'SCOPE',
+            'ENDPOINT'
+        ],
+        'Chronicle': [
+            'CHRONICLE_API_KEY',
+            'CHRONICLE_SECRET_KEY', 
+            'CHRONICLE_FEED_ID',
+            'CHRONICLE_ENDPOINT'
+        ],
+        'Network': [
+            'HTTP_PROXY',
+            'HTTPS_PROXY'
+        ]
+    }
+    
+    optional_vars = {
+        'SSL/TLS': [
+            'REQUESTS_CA_BUNDLE',
+            'CURL_CA_BUNDLE',
+            'SSL_CERT_FILE'
+        ],
+        'Redis': [
+            'REDIS_HOST',
+            'REDIS_PORT',
+            'REDIS_DB',
+            'REDIS_PASSWORD'
+        ]
+    }
     
     issues = []
+    warnings = []
     
-    # Check proxy settings
-    http_proxy = os.environ.get('HTTP_PROXY') or os.environ.get('http_proxy')
-    https_proxy = os.environ.get('HTTPS_PROXY') or os.environ.get('https_proxy')
-    
-    if http_proxy:
-        print(f"   ✅ HTTP_PROXY: {http_proxy}")
-    else:
-        print("   ⚠️  HTTP_PROXY not set")
-        issues.append("Set HTTP_PROXY environment variable")
-    
-    if https_proxy:
-        print(f"   ✅ HTTPS_PROXY: {https_proxy}")
-    else:
-        print("   ⚠️  HTTPS_PROXY not set")
-        issues.append("Set HTTPS_PROXY environment variable")
-    
-    # Check CA bundle
-    ca_bundle = os.environ.get('REQUESTS_CA_BUNDLE')
-    if ca_bundle and os.path.exists(ca_bundle):
-        print(f"   ✅ CA Bundle: {ca_bundle}")
-    else:
-        # Try to find system CA bundle
-        ca_locations = [
-            '/etc/ssl/certs/ca-certificates.crt',
-            '/etc/ssl/certs/ca-bundle.crt',
-            '/etc/pki/tls/certs/ca-bundle.crt',
-            '/usr/local/share/certs/ca-root-nss.crt',
-            '/etc/ssl/cert.pem'
-        ]
-        
-        found_ca = None
-        for ca_path in ca_locations:
-            if os.path.exists(ca_path):
-                found_ca = ca_path
-                os.environ['REQUESTS_CA_BUNDLE'] = ca_path
-                print(f"   ✅ Auto-detected CA Bundle: {ca_path}")
-                break
-        
-        if not found_ca:
-            print("   ⚠️  No CA bundle found")
-            issues.append("Set REQUESTS_CA_BUNDLE to corporate CA certificate file")
-    
-    # Test basic connectivity
-    print("\n🌐 Testing network connectivity...")
-    test_urls = [
-        "https://huggingface.co",
-        "https://pypi.org"
-    ]
-    
-    import requests
-    session = requests.Session()
-    session.timeout = 10
-    
-    # Configure proxy for test
-    if http_proxy or https_proxy:
-        session.proxies = {
-            'http': http_proxy or https_proxy,
-            'https': https_proxy or http_proxy
-        }
-    
-    # Configure CA bundle for test
-    ca_bundle = os.environ.get('REQUESTS_CA_BUNDLE')
-    if ca_bundle:
-        session.verify = ca_bundle
-    
-    connectivity_ok = True
-    for url in test_urls:
-        try:
-            response = session.head(url, timeout=10)
-            if response.status_code < 400:
-                print(f"   ✅ {url}: OK")
+    # Check required variables
+    for category, vars_list in required_vars.items():
+        print(f"\n📋 {category} Configuration:")
+        for var in vars_list:
+            value = os.getenv(var)
+            if value:
+                # Mask sensitive values
+                if any(secret in var.upper() for secret in ['SECRET', 'KEY', 'PASSWORD']):
+                    display_value = f"{'*' * min(len(value), 8)}...({len(value)} chars)"
+                else:
+                    display_value = value[:50] + '...' if len(value) > 50 else value
+                print(f"   ✅ {var}: {display_value}")
             else:
-                print(f"   ⚠️  {url}: HTTP {response.status_code}")
-                connectivity_ok = False
-        except Exception as e:
-            print(f"   ❌ {url}: {str(e)[:50]}...")
-            connectivity_ok = False
+                print(f"   ❌ {var}: NOT SET")
+                issues.append(f"{var} is required for {category}")
     
+    # Check optional variables
+    for category, vars_list in optional_vars.items():
+        print(f"\n📋 {category} Configuration (Optional):")
+        for var in vars_list:
+            value = os.getenv(var)
+            if value:
+                if any(secret in var.upper() for secret in ['SECRET', 'KEY', 'PASSWORD']):
+                    display_value = f"{'*' * min(len(value), 8)}...({len(value)} chars)"
+                else:
+                    display_value = value[:50] + '...' if len(value) > 50 else value
+                print(f"   ✅ {var}: {display_value}")
+            else:
+                print(f"   ⚠️  {var}: NOT SET")
+                if category == 'Network' and var in ['HTTP_PROXY', 'HTTPS_PROXY']:
+                    warnings.append(f"{var} not set - may be required for corporate network")
+    
+    # Report status
     if issues:
-        print(f"\n⚠️  Configuration issues found:")
+        print(f"\n❌ Configuration Issues Found:")
         for issue in issues:
             print(f"   • {issue}")
-        
-        print(f"\n🔧 To fix these issues:")
-        print(f"   1. Run the corporate setup script:")
-        print(f"      bash setup_corporate_network.sh")
-        print(f"   2. Or manually set environment variables:")
-        print(f"      export HTTP_PROXY=http://proxy.company.com:8080")
-        print(f"      export HTTPS_PROXY=http://proxy.company.com:8080")
-        print(f"      export REQUESTS_CA_BUNDLE=/path/to/corporate-ca.crt")
-        
         return False
     
-    if not connectivity_ok:
-        print(f"\n🚨 Network connectivity issues detected!")
-        print(f"   This will prevent model downloads.")
-        print(f"   Contact IT to whitelist these domains:")
-        print(f"   • huggingface.co")
-        print(f"   • cdn-lfs.huggingface.co") 
-        print(f"   • pypi.org")
-        print(f"   • files.pythonhosted.org")
-        return False
+    if warnings:
+        print(f"\n⚠️  Configuration Warnings:")
+        for warning in warnings:
+            print(f"   • {warning}")
     
-    print(f"\n✅ Corporate environment looks good!")
+    print(f"\n✅ Environment configuration looks good!")
     return True
+
+def test_corporate_connectivity():
+    """Test corporate network connectivity"""
+    print("\n🌐 Testing corporate network connectivity...")
+    
+    import requests
+    
+    # Create session with environment proxy settings
+    session = requests.Session()
+    
+    http_proxy = os.getenv('HTTP_PROXY')
+    https_proxy = os.getenv('HTTPS_PROXY')
+    
+    if http_proxy or https_proxy:
+        session.proxies = {
+            'http': http_proxy,
+            'https': https_proxy
+        }
+        print(f"   🔧 Using proxy: {https_proxy or http_proxy}")
+    
+    # Test Chronicle endpoint if configured
+    chronicle_endpoint = os.getenv('CHRONICLE_ENDPOINT')
+    if chronicle_endpoint:
+        try:
+            response = session.head(chronicle_endpoint, timeout=10)
+            if response.status_code < 500:
+                print(f"   ✅ Chronicle endpoint accessible: {chronicle_endpoint}")
+            else:
+                print(f"   ⚠️  Chronicle endpoint returned {response.status_code}: {chronicle_endpoint}")
+        except Exception as e:
+            print(f"   ❌ Chronicle endpoint failed: {str(e)[:60]}...")
+    
+    # Test model download domains
+    test_domains = [
+        'https://huggingface.co',
+        'https://files.pythonhosted.org'
+    ]
+    
+    for domain in test_domains:
+        try:
+            response = session.head(domain, timeout=10)
+            if response.status_code < 400:
+                print(f"   ✅ {domain}: Accessible")
+            else:
+                print(f"   ⚠️  {domain}: HTTP {response.status_code}")
+        except Exception as e:
+            print(f"   ❌ {domain}: {str(e)[:60]}...")
 
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully"""
@@ -144,20 +169,29 @@ def main():
         ]
     )
     
-    # Reduce noise from network modules
+    # Reduce noise from certain modules
     logging.getLogger('urllib3').setLevel(logging.ERROR)
     logging.getLogger('requests').setLevel(logging.ERROR)
     
     logger = logging.getLogger(__name__)
     
-    print("🚀 AO1 BigQuery Semantic Scanner v2.0 - Corporate Edition")
-    print("=" * 65)
+    print("🚀 AO1 BigQuery Semantic Scanner v2.0 - Environment Based")
+    print("=" * 70)
     
-    # Check corporate environment first
-    if not check_corporate_environment():
-        print("\n❌ Corporate environment not properly configured")
-        print("Please fix the configuration issues above and try again.")
+    # Check environment configuration
+    if not check_environment_variables():
+        print("\n❌ Environment configuration incomplete")
+        print("Please set the required environment variables and try again.")
+        print("\n💡 Example setup:")
+        print("export HTTP_PROXY=http://10.184.3.109:8080")
+        print("export HTTPS_PROXY=http://10.184.3.109:8080") 
+        print("export CHRONICLE_API_KEY=your_api_key")
+        print("export CLIENT_ID=your_client_id")
+        print("# ... (set other required variables)")
         sys.exit(1)
+    
+    # Test network connectivity
+    test_corporate_connectivity()
     
     # Check service account
     SERVICE_ACCOUNT_FILE = os.path.join(file_path, "gcp_prod_key.json")
@@ -176,46 +210,54 @@ def main():
         print(f"   ✅ Connected to project: {project_id}")
         print(f"   ✅ Found {len(datasets)} datasets")
         
-        # Initialize scanner with explicit corporate support
+        # Initialize scanner with environment-based configuration
         print("\n🤖 Initializing AO1 semantic analyzer...")
-        print("   📦 Downloading AI models (this may take 2-3 minutes)...")
-        print("   🌐 Using corporate proxy and certificates...")
+        print("   📦 Loading AI models with corporate authentication...")
+        print("   🔐 Using environment-based configuration...")
         
         from scanner import AO1Scanner
         
         try:
             scanner = AO1Scanner(service_account_path=SERVICE_ACCOUNT_FILE)
-            print("   ✅ Scanner initialized successfully with AI models!")
+            
+            # Get configuration summary
+            if hasattr(scanner.semantic_analyzer, 'embedding_manager') and \
+               hasattr(scanner.semantic_analyzer.embedding_manager, 'foundation_models'):
+                config_summary = scanner.semantic_analyzer.embedding_manager.foundation_models.get_configuration_summary()
+                
+                print("   ✅ Scanner initialized successfully!")
+                print(f"   📊 Configuration Summary:")
+                print(f"      • Authentication: {'✅' if config_summary['authentication_configured'] else '❌'}")
+                print(f"      • Chronicle: {'✅' if config_summary['chronicle_configured'] else '❌'}")
+                print(f"      • Proxy: {'✅' if config_summary['proxy_configured'] else '❌'}")
+                print(f"      • AI Models: {'✅' if config_summary['models_loaded'] else '❌'}")
+            else:
+                print("   ✅ Scanner initialized!")
             
         except Exception as e:
             logger.error(f"❌ Scanner initialization failed: {e}")
-            print(f"\n🚨 Model download failed!")
+            print(f"\n🚨 Initialization failed!")
             print(f"   Error: {str(e)[:100]}...")
-            print(f"\n🔧 Possible solutions:")
-            print(f"   1. Check that huggingface.co is accessible from your network")
-            print(f"   2. Verify proxy settings are correct")
-            print(f"   3. Contact IT to whitelist required domains")
-            print(f"   4. Check firewall logs for blocked requests")
-            
-            # Show exact curl command for testing
-            proxy = os.environ.get('HTTPS_PROXY') or os.environ.get('HTTP_PROXY')
-            if proxy:
-                print(f"\n🧪 Test connectivity manually:")
-                print(f"   curl --proxy {proxy} -v https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2")
+            print(f"\n🔧 Troubleshooting steps:")
+            print(f"   1. Verify all environment variables are set correctly")
+            print(f"   2. Test network connectivity to required domains")
+            print(f"   3. Check corporate firewall allows AI model downloads")
+            print(f"   4. Verify authentication credentials are valid")
+            print(f"   5. Check proxy configuration and certificates")
             
             sys.exit(1)
         
         # Run the scan
         print("\n🔍 Starting comprehensive dataset scan...")
-        print("📊 Analyzing BigQuery data for AO1 semantic patterns...")
+        print("📊 Analyzing BigQuery data with corporate authentication...")
         print("⏱️  Estimated time: 3-7 minutes...")
         
         results = scanner.scan_all_datasets(max_workers=2, quick_scan=False)
         
         # Display results
-        print("\n" + "="*65)
+        print("\n" + "="*70)
         print("🎯 AO1 SEMANTIC SCAN COMPLETE")
-        print("="*65)
+        print("="*70)
         
         summary = results['summary']
         metadata = results['scan_metadata']
