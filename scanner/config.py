@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-PROJECT_ID = "project-id"
+PROJECT_ID = "prj-fisv-p-gcss-sas-dl9dd0f1df"
 SERVICE_ACCOUNT_FILE = "gcp_prod_key.json"
 
 SEMANTIC_MODELS_CACHE = "./ao1_models"

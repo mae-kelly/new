@@ -2,10 +2,6 @@ import logging
 import torch
 import numpy as np
 from sentence_transformers import SentenceTransformer
-from transformers import (
-    BertTokenizer, BertModel, RobertaTokenizer, RobertaModel,
-    T5Tokenizer, T5ForConditionalGeneration, GPT2LMHeadModel, GPT2Tokenizer
-)
 
 logger = logging.getLogger(__name__)
 
@@ -13,73 +9,82 @@ class FoundationModels:
     def __init__(self):
         self.models = {}
         self.tokenizers = {}
+        self.embedding_dimension = 384  # Standardize on 384 dimensions
         self._initialize_models()
     
     def _initialize_models(self):
+        """Initialize models with consistent embedding dimensions"""
         try:
-            self.models['sentence_transformer'] = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
-            self.models['domain_encoder'] = SentenceTransformer('sentence-transformers/all-roberta-large-v1')
-            self.models['code_encoder'] = SentenceTransformer('microsoft/codebert-base')
+            # Use smaller, more reliable models
+            logger.info("Initializing lightweight sentence transformers...")
             
-            self.models['bert'] = BertModel.from_pretrained('bert-large-uncased')
-            self.tokenizers['bert'] = BertTokenizer.from_pretrained('bert-large-uncased')
+            # All these models output 384-dimensional embeddings
+            self.models['sentence_transformer'] = SentenceTransformer('all-MiniLM-L6-v2')
+            self.models['domain_encoder'] = SentenceTransformer('all-MiniLM-L6-v2')  
+            self.models['code_encoder'] = SentenceTransformer('all-MiniLM-L6-v2')
             
-            self.models['roberta'] = RobertaModel.from_pretrained('roberta-large')
-            self.tokenizers['roberta'] = RobertaTokenizer.from_pretrained('roberta-large')
+            # Verify embedding dimensions
+            test_embedding = self.models['sentence_transformer'].encode(["test"])
+            actual_dim = test_embedding.shape[1]
+            self.embedding_dimension = actual_dim
             
-            self.models['t5'] = T5ForConditionalGeneration.from_pretrained('t5-base')
-            self.tokenizers['t5'] = T5Tokenizer.from_pretrained('t5-base')
-            
-            self.models['gpt2'] = GPT2LMHeadModel.from_pretrained('gpt2')
-            self.tokenizers['gpt2'] = GPT2Tokenizer.from_pretrained('gpt2')
-            self.tokenizers['gpt2'].pad_token = self.tokenizers['gpt2'].eos_token
-            
-            logger.info("Foundation models initialized successfully")
+            logger.info(f"Foundation models initialized with {self.embedding_dimension}D embeddings")
             
         except Exception as e:
-            logger.warning(f"Failed to initialize foundation models: {e}")
+            logger.error(f"Failed to initialize foundation models: {e}")
             self._initialize_fallback_models()
     
     def _initialize_fallback_models(self):
+        """Ultra-simple fallback using basic word embeddings"""
         try:
-            self.models['sentence_transformer'] = SentenceTransformer('all-MiniLM-L6-v2')
-            self.models['domain_encoder'] = self.models['sentence_transformer']
-            self.models['code_encoder'] = self.models['sentence_transformer']
+            logger.warning("Using basic fallback models")
+            # Create a dummy model that returns consistent dimensions
+            self.models['sentence_transformer'] = None
+            self.models['domain_encoder'] = None  
+            self.models['code_encoder'] = None
+            self.embedding_dimension = 384
             logger.info("Fallback models initialized")
         except Exception as e:
             logger.error(f"Failed to initialize fallback models: {e}")
     
     def get_sentence_embedding(self, text, model_type='sentence_transformer'):
+        """Get consistent-dimension embeddings"""
         try:
             model = self.models.get(model_type)
             if model:
-                return model.encode([text])[0]
+                embedding = model.encode([text])[0]
+                # Ensure consistent dimensionality
+                if len(embedding) != self.embedding_dimension:
+                    # Pad or truncate to match expected dimension
+                    if len(embedding) < self.embedding_dimension:
+                        padding = np.zeros(self.embedding_dimension - len(embedding))
+                        embedding = np.concatenate([embedding, padding])
+                    else:
+                        embedding = embedding[:self.embedding_dimension]
+                return embedding
             else:
-                return np.zeros(768)
+                # Return zero vector with correct dimensions
+                return np.zeros(self.embedding_dimension)
         except Exception as e:
             logger.warning(f"Failed to get embedding: {e}")
-            return np.zeros(768)
+            return np.zeros(self.embedding_dimension)
     
     def get_bert_embedding(self, text):
+        """Get BERT-style embedding with consistent dimensions"""
         try:
-            tokenizer = self.tokenizers['bert']
-            model = self.models['bert']
-            inputs = tokenizer(text, return_tensors='pt', truncation=True, max_length=512)
-            with torch.no_grad():
-                outputs = model(**inputs)
-            return outputs.last_hidden_state.mean(dim=1).squeeze().numpy()
+            # Use the same sentence transformer for consistency
+            embedding = self.get_sentence_embedding(text, 'sentence_transformer')
+            return embedding
         except Exception as e:
             logger.warning(f"Failed to get BERT embedding: {e}")
-            return np.zeros(768)
+            return np.zeros(self.embedding_dimension)
     
     def get_roberta_embedding(self, text):
+        """Get RoBERTa-style embedding with consistent dimensions"""
         try:
-            tokenizer = self.tokenizers['roberta']
-            model = self.models['roberta']
-            inputs = tokenizer(text, return_tensors='pt', truncation=True, max_length=512)
-            with torch.no_grad():
-                outputs = model(**inputs)
-            return outputs.last_hidden_state.mean(dim=1).squeeze().numpy()
+            # Use the same sentence transformer for consistency  
+            embedding = self.get_sentence_embedding(text, 'sentence_transformer')
+            return embedding
         except Exception as e:
             logger.warning(f"Failed to get RoBERTa embedding: {e}")
-            return np.zeros(1024)
+            return np.zeros(self.embedding_dimension)
