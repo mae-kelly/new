@@ -206,11 +206,8 @@ class BigQueryConnection:
                 if response.status_code >= 400:
                     logger.warning(f"Chronicle logging failed: {response.status_code}")
                     
-            except Exception as e:
-                logger.debug(f"Chronicle logging error: {e}")
-        
         except Exception as e:
-            logger.debug(f"Activity logging failed: {e}")
+            logger.debug(f"Chronicle logging error: {e}")
     
     def run_bq_query(self, query, params=None):
         try:
