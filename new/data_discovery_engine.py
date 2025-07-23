@@ -8,10 +8,16 @@ import logging
 from typing import Dict, List, Any
 from google.cloud import bigquery
 from google.oauth2 import service_account
+import ssl
+import certifi
 
 class BigQueryDataDiscovery:
     def __init__(self, project_root: str = "."):
         self.project_root = Path(project_root)
+        
+        # Set SSL certificate bundle like the original script
+        os.environ['SSL_CERT_FILE'] = certifi.where()
+        os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
         
         SERVICE_ACCOUNT_FILE = os.path.join(self.project_root, "gcp_prod_key.json")
         credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE)
