@@ -18,9 +18,31 @@ class ContentAnalyzer:
         self.project_root = Path(project_root)
         self.discovery_results_path = Path(discovery_results_path)
         
-        # Set SSL certificate bundle like the original script
-        os.environ['SSL_CERT_FILE'] = certifi.where()
-        os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+        # Configure SSL/TLS using the actual certificates in the repo
+        ssl_cert_path = os.path.join(self.project_root, "..", "ssl", "nexia.1dc.com.crt")
+        ssl_key_path = os.path.join(self.project_root, "..", "ssl", "nexia.1dc.com.key")
+        
+        # Set SSL environment variables to use the repo's certificates
+        if os.path.exists(ssl_cert_path):
+            os.environ['SSL_CERT_FILE'] = ssl_cert_path
+            os.environ['REQUESTS_CA_BUNDLE'] = ssl_cert_path
+            os.environ['CURL_CA_BUNDLE'] = ssl_cert_path
+        else:
+            # Fallback to certifi if repo certs not found
+            os.environ['SSL_CERT_FILE'] = certifi.where()
+            os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+            os.environ['CURL_CA_BUNDLE'] = certifi.where()
+        
+        # Disable SSL warnings
+        import urllib3
+        urllib3.disable_warnings()
+        
+        # Create custom SSL context if we have the key file
+        if os.path.exists(ssl_key_path) and os.path.exists(ssl_cert_path):
+            ssl_context = ssl.create_default_context()
+            ssl_context.load_cert_chain(ssl_cert_path, ssl_key_path)
+        else:
+            ssl._create_default_https_context = ssl._create_unverified_context
         
         SERVICE_ACCOUNT_FILE = os.path.join(self.project_root, "gcp_prod_key.json")
         credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE)
