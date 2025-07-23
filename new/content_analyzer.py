@@ -44,6 +44,7 @@ class ContentAnalyzer:
         else:
             ssl._create_default_https_context = ssl._create_unverified_context
         
+        # Connect to BigQuery exactly like the original script
         SERVICE_ACCOUNT_FILE = os.path.join(self.project_root, "gcp_prod_key.json")
         credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE)
         project = "chronicle-flow"
