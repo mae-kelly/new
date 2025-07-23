@@ -35,8 +35,11 @@ class ContentAnalyzer:
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
 
-    def runBQQuery(self, query, params=[]):
-        df = self.clientBQ.query(query, params).to_dataframe()
+    def runBQQuery(self, query, params=None):
+        if params:
+            df = self.clientBQ.query(query, job_config=params).to_dataframe()
+        else:
+            df = self.clientBQ.query(query).to_dataframe()
         return df
 
     def analyze_all_content(self):
