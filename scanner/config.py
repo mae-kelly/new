@@ -1,16 +1,13 @@
 import os
 from pathlib import Path
 
-# Match your working script's project ID
 PROJECT_ID = "chronicle-fisv"
 SERVICE_ACCOUNT_FILE = "gcp_prod_key.json"
 
 SEMANTIC_MODELS_CACHE = "./ao1_models"
 RESULTS_OUTPUT_DIR = "./ao1_results"
 
-# Environment-based configuration like your working script
 def get_env_config():
-    """Get configuration from environment variables like your working script"""
     return {
         'authority': os.getenv('AUTHORITY'),
         'client_id': os.getenv('CLIENT_ID'), 
@@ -25,7 +22,6 @@ def get_env_config():
         'https_proxy': os.getenv('HTTPS_PROXY')
     }
 
-# AO1 Concepts remain the same but optimized
 AO1_CONCEPTS = {
     'asset_identity': {
         'patterns': [

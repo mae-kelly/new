@@ -8,12 +8,10 @@ from pathlib import Path
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
-# Add current directory to path
 file_path = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, file_path)
 
 def check_environment_variables():
-    """Check environment variables like your working script"""
     print("🔍 Checking environment variables...")
     
     required_vars = {
@@ -71,7 +69,6 @@ def check_environment_variables():
     return True
 
 def test_bigquery_connection():
-    """Test BigQuery connection like your working script"""
     print("\n🔗 Testing BigQuery connection...")
     
     SERVICE_ACCOUNT_FILE = os.path.join(file_path, "gcp_prod_key.json")
@@ -81,7 +78,7 @@ def test_bigquery_connection():
     
     try:
         credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE)
-        project_id = "chronicle-fisv"  # Match your working script
+        project_id = "chronicle-fisv"
         client = bigquery.Client(project=project_id, credentials=credentials)
         
         datasets = list(client.list_datasets())
@@ -94,7 +91,6 @@ def test_bigquery_connection():
         return False
 
 def test_corporate_connectivity():
-    """Test corporate network connectivity"""
     print("\n🌐 Testing corporate network connectivity...")
     
     import requests
@@ -127,16 +123,13 @@ def test_corporate_connectivity():
             print(f"   ❌ {domain}: {str(e)[:60]}...")
 
 def signal_handler(signum, frame):
-    """Handle shutdown signals gracefully"""
     print("\n🛑 Scan interrupted by user")
     sys.exit(0)
 
 def main():
-    # Setup signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    # Setup logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -146,7 +139,6 @@ def main():
         ]
     )
     
-    # Reduce noise from certain modules
     logging.getLogger('urllib3').setLevel(logging.ERROR)
     logging.getLogger('requests').setLevel(logging.ERROR)
     logging.getLogger('transformers').setLevel(logging.ERROR)
@@ -156,22 +148,18 @@ def main():
     print("🚀 AO1 BigQuery Semantic Scanner v2.0 - Fixed Connection")
     print("=" * 70)
     
-    # Check environment configuration
     if not check_environment_variables():
         print("\n❌ Environment configuration incomplete")
         print("Please set the required environment variables and try again.")
         sys.exit(1)
     
-    # Test BigQuery connection
     if not test_bigquery_connection():
         print("\n❌ BigQuery connection failed")
         sys.exit(1)
     
-    # Test network connectivity
     test_corporate_connectivity()
     
     try:
-        # Initialize scanner with fixed configuration
         print("\n🤖 Initializing AO1 semantic analyzer...")
         print("   📦 Loading AI models with corporate authentication...")
         print("   🔐 Using environment-based configuration...")
@@ -181,7 +169,6 @@ def main():
         SERVICE_ACCOUNT_FILE = os.path.join(file_path, "gcp_prod_key.json")
         scanner = AO1Scanner(service_account_path=SERVICE_ACCOUNT_FILE)
         
-        # Get configuration summary
         try:
             if hasattr(scanner.semantic_analyzer, 'embedding_manager') and \
                hasattr(scanner.semantic_analyzer.embedding_manager, 'foundation_models'):
@@ -199,14 +186,12 @@ def main():
             logger.debug(f"Configuration summary failed: {e}")
             print("   ✅ Scanner initialized!")
         
-        # Run the scan
         print("\n🔍 Starting comprehensive dataset scan...")
         print("📊 Analyzing BigQuery data with corporate authentication...")
         print("⏱️  Estimated time: 3-7 minutes...")
         
         results = scanner.scan_all_datasets(max_workers=2, quick_scan=False)
         
-        # Display results
         print("\n" + "="*70)
         print("🎯 AO1 SEMANTIC SCAN COMPLETE")
         print("="*70)
@@ -226,7 +211,6 @@ def main():
         print(f"   ⭐ High-confidence AO1 fields: {discovery['high_confidence_fields']}")
         print(f"   🎯 AO1-relevant tables: {discovery['ao1_relevant_tables']}")
         
-        # Show AO1 findings
         ao1_types = summary['ao1_table_types']
         if any(ao1_types.values()):
             print(f"\n🛡️  AO1 Data Sources Found:")
@@ -237,7 +221,6 @@ def main():
             if ao1_types['log_source_tables']:
                 print(f"   📝 Log sources: {ao1_types['log_source_tables']} tables")
         
-        # Show categories
         categories = summary['category_distribution']
         if categories:
             print(f"\n📂 Field Categories:")
@@ -245,7 +228,6 @@ def main():
                 if count > 0:
                     print(f"   • {category.replace('_', ' ').title()}: {count}")
         
-        # Show best queries
         performance = summary['query_performance']
         if performance['total_queries_generated'] > 0:
             print(f"\n🔧 Generated Queries:")
@@ -260,13 +242,11 @@ def main():
                     print(f"   {i}. {query.purpose}")
                     print(f"      Confidence: {query.confidence_score:.2f} {stars}")
         
-        # Recommendations
         if summary['recommendations']:
             print(f"\n💡 Key Recommendations:")
             for i, rec in enumerate(summary['recommendations'][:3], 1):
                 print(f"   {i}. {rec}")
         
-        # Output
         print(f"\n📁 Results: {scanner.output_dir}")
         print("📄 Files:")
         print("   • ao1_scan_results_*.json - Complete analysis")
@@ -283,7 +263,6 @@ def main():
         logger.error(f"❌ Scan failed: {e}")
         print(f"\n❌ Unexpected error: {e}")
         
-        # Provide troubleshooting info
         print(f"\n🔧 Troubleshooting steps:")
         print(f"   1. Verify all environment variables are set correctly")
         print(f"   2. Test network connectivity to required domains")
