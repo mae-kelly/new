@@ -44,353 +44,8 @@ class QueryGenerator:
         system_classification_queries = self._generate_system_classification_queries(semantic_results)
         queries.extend(system_classification_queries)
         
-        url_fqdn_queries = self._generate_url_fqdn_coverage_queries(semantic_results)
-        queries.extend(url_fqdn_queries)
-        
-        ipam_vpc_queries = self._generate_ipam_vpc_queries(semantic_results)
-        queries.extend(ipam_vpc_queries)
-        
-        network_zone_queries = self._generate_network_zone_queries(semantic_results)
-        queries.extend(network_zone_queries)
-        
-        log_volume_queries = self._generate_log_volume_queries(semantic_results)
-        queries.extend(log_volume_queries)
-        
-        return queries
-    
-    def _generate_infrastructure_type_queries(self, semantic_results: Dict[str, List[FieldAnalysis]]) -> List[GeneratedQuery]:
-        queries = []
-        infra_tables = self._find_tables_with_category(semantic_results, 'infrastructure_type')
-        asset_tables = self._find_tables_with_category(semantic_results, 'asset_identity')
-        
-        for table_name, infra_fields in infra_tables.items():
-            infra_field = self._find_best_field(infra_fields, 'infrastructure_type')
-            asset_field = self._find_best_field(infra_fields, ['asset_identity', 'network_identity'])
-            
-            if not infra_field:
-                continue
-                
-            if asset_field:
-                query = f"""
-                    WITH infrastructure_coverage AS (
-                        SELECT 
-                            `{infra_field.field_name}` as infrastructure_type,
-                            COUNT(DISTINCT COALESCE(LOWER(TRIM(`{asset_field.field_name}`)), '')) as unique_assets,
-                            COUNT(*) as total_records
-                        FROM `{self.project_id}.{table_name}`
-                        WHERE `{infra_field.field_name}` IS NOT NULL
-                        AND `{asset_field.field_name}` IS NOT NULL
-                        GROUP BY `{infra_field.field_name}`
-                    )
-                    SELECT 
-                        infrastructure_type,
-                        unique_assets,
-                        total_records,
-                        ROUND(unique_assets * 100.0 / SUM(unique_assets) OVER(), 2) as percentage_of_assets
-                    FROM infrastructure_coverage
-                    ORDER BY unique_assets DESC
-                """
-                key_fields = [infra_field.field_name, asset_field.field_name]
-                confidence = (infra_field.confidence_score + asset_field.confidence_score) / 2
-            else:
-                query = f"""
-                    SELECT 
-                        `{infra_field.field_name}` as infrastructure_type,
-                        COUNT(*) as record_count,
-                        ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 2) as percentage
-                    FROM `{self.project_id}.{table_name}`
-                    WHERE `{infra_field.field_name}` IS NOT NULL
-                    GROUP BY `{infra_field.field_name}`
-                    ORDER BY record_count DESC
-                """
-                key_fields = [infra_field.field_name]
-                confidence = infra_field.confidence_score
-            
-            queries.append(GeneratedQuery(
-                purpose=f"Infrastructure Type Distribution - {table_name}",
-                query=query.strip(),
-                source_tables=[table_name],
-                key_fields=key_fields,
-                expected_result_type="infrastructure_coverage",
-                confidence_score=confidence
-            ))
-        
-        return queries
-    
-    def _generate_system_classification_queries(self, semantic_results: Dict[str, List[FieldAnalysis]]) -> List[GeneratedQuery]:
-        queries = []
-        system_tables = self._find_tables_with_category(semantic_results, 'system_classification')
-        
-        for table_name, system_fields in system_tables.items():
-            system_field = self._find_best_field(system_fields, 'system_classification')
-            asset_field = self._find_best_field(system_fields, ['asset_identity', 'network_identity'])
-            
-            if not system_field:
-                continue
-            
-            if asset_field:
-                query = f"""
-                    WITH system_classification_coverage AS (
-                        SELECT 
-                            `{system_field.field_name}` as system_type,
-                            COUNT(DISTINCT COALESCE(LOWER(TRIM(`{asset_field.field_name}`)), '')) as classified_assets,
-                            COUNT(*) as total_entries
-                        FROM `{self.project_id}.{table_name}`
-                        WHERE `{system_field.field_name}` IS NOT NULL
-                        AND `{asset_field.field_name}` IS NOT NULL
-                        GROUP BY `{system_field.field_name}`
-                    )
-                    SELECT 
-                        system_type,
-                        classified_assets,
-                        total_entries,
-                        ROUND(classified_assets * 100.0 / SUM(classified_assets) OVER(), 2) as classification_percentage
-                    FROM system_classification_coverage
-                    ORDER BY classified_assets DESC
-                """
-                key_fields = [system_field.field_name, asset_field.field_name]
-                confidence = (system_field.confidence_score + asset_field.confidence_score) / 2
-            else:
-                query = f"""
-                    SELECT 
-                        `{system_field.field_name}` as system_type,
-                        COUNT(*) as classification_count
-                    FROM `{self.project_id}.{table_name}`
-                    WHERE `{system_field.field_name}` IS NOT NULL
-                    GROUP BY `{system_field.field_name}`
-                    ORDER BY classification_count DESC
-                """
-                key_fields = [system_field.field_name]
-                confidence = system_field.confidence_score
-            
-            queries.append(GeneratedQuery(
-                purpose=f"System Classification Analysis - {table_name}",
-                query=query.strip(),
-                source_tables=[table_name],
-                key_fields=key_fields,
-                expected_result_type="system_classification",
-                confidence_score=confidence
-            ))
-        
-        return queries
-    
-    def _generate_url_fqdn_coverage_queries(self, semantic_results: Dict[str, List[FieldAnalysis]]) -> List[GeneratedQuery]:
-        queries = []
-        
-        for table_name, fields in semantic_results.items():
-            url_fields = [f for f in fields if 'url' in f.field_name.lower() or 'fqdn' in f.field_name.lower()]
-            asset_field = self._find_best_field(fields, ['asset_identity', 'network_identity'])
-            
-            for url_field in url_fields:
-                if url_field.confidence_score < 0.6:
-                    continue
-                
-                if asset_field:
-                    query = f"""
-                        WITH url_fqdn_coverage AS (
-                            SELECT 
-                                CASE 
-                                    WHEN `{url_field.field_name}` IS NOT NULL AND TRIM(`{url_field.field_name}`) != '' THEN 'HAS_URL_FQDN'
-                                    ELSE 'NO_URL_FQDN'
-                                END as url_fqdn_status,
-                                COUNT(DISTINCT COALESCE(LOWER(TRIM(`{asset_field.field_name}`)), '')) as asset_count
-                            FROM `{self.project_id}.{table_name}`
-                            WHERE `{asset_field.field_name}` IS NOT NULL
-                            GROUP BY url_fqdn_status
-                        )
-                        SELECT 
-                            url_fqdn_status,
-                            asset_count,
-                            ROUND(asset_count * 100.0 / SUM(asset_count) OVER(), 2) as coverage_percentage
-                        FROM url_fqdn_coverage
-                        ORDER BY asset_count DESC
-                    """
-                    key_fields = [url_field.field_name, asset_field.field_name]
-                    confidence = (url_field.confidence_score + asset_field.confidence_score) / 2
-                else:
-                    query = f"""
-                        SELECT 
-                            CASE 
-                                WHEN `{url_field.field_name}` IS NOT NULL AND TRIM(`{url_field.field_name}`) != '' THEN 'HAS_URL_FQDN'
-                                ELSE 'NO_URL_FQDN'
-                            END as url_fqdn_status,
-                            COUNT(*) as record_count
-                        FROM `{self.project_id}.{table_name}`
-                        GROUP BY url_fqdn_status
-                        ORDER BY record_count DESC
-                    """
-                    key_fields = [url_field.field_name]
-                    confidence = url_field.confidence_score
-                
-                queries.append(GeneratedQuery(
-                    purpose=f"URL/FQDN Coverage Analysis - {table_name}.{url_field.field_name}",
-                    query=query.strip(),
-                    source_tables=[table_name],
-                    key_fields=key_fields,
-                    expected_result_type="url_fqdn_coverage",
-                    confidence_score=confidence
-                ))
-        
-        return queries
-    
-    def _generate_ipam_vpc_queries(self, semantic_results: Dict[str, List[FieldAnalysis]]) -> List[GeneratedQuery]:
-        queries = []
-        
-        for table_name, fields in semantic_results.items():
-            ipam_fields = [f for f in fields if 'ipam' in f.field_name.lower() or 'vpc' in f.field_name.lower()]
-            ip_fields = [f for f in fields if f.ao1_category == 'network_identity' and 'ip' in f.field_name.lower()]
-            
-            for ipam_field in ipam_fields:
-                for ip_field in ip_fields:
-                    if ipam_field.confidence_score < 0.6 or ip_field.confidence_score < 0.6:
-                        continue
-                    
-                    query = f"""
-                        WITH ipam_vpc_coverage AS (
-                            SELECT 
-                                `{ipam_field.field_name}` as ipam_vpc_identifier,
-                                COUNT(DISTINCT `{ip_field.field_name}`) as unique_ips,
-                                COUNT(*) as total_records
-                            FROM `{self.project_id}.{table_name}`
-                            WHERE `{ipam_field.field_name}` IS NOT NULL
-                            AND `{ip_field.field_name}` IS NOT NULL
-                            GROUP BY `{ipam_field.field_name}`
-                        )
-                        SELECT 
-                            ipam_vpc_identifier,
-                            unique_ips,
-                            total_records,
-                            ROUND(unique_ips * 100.0 / SUM(unique_ips) OVER(), 2) as ip_distribution_percentage
-                        FROM ipam_vpc_coverage
-                        ORDER BY unique_ips DESC
-                    """
-                    
-                    queries.append(GeneratedQuery(
-                        purpose=f"iPAM/VPC Coverage Analysis - {table_name}",
-                        query=query.strip(),
-                        source_tables=[table_name],
-                        key_fields=[ipam_field.field_name, ip_field.field_name],
-                        expected_result_type="ipam_vpc_coverage",
-                        confidence_score=(ipam_field.confidence_score + ip_field.confidence_score) / 2
-                    ))
-        
-        return queries
-    
-    def _generate_network_zone_queries(self, semantic_results: Dict[str, List[FieldAnalysis]]) -> List[GeneratedQuery]:
-        queries = []
-        
-        for table_name, fields in semantic_results.items():
-            zone_fields = [f for f in fields if 'zone' in f.field_name.lower() or 'network' in f.field_name.lower()]
-            asset_field = self._find_best_field(fields, ['asset_identity', 'network_identity'])
-            
-            for zone_field in zone_fields:
-                if zone_field.confidence_score < 0.6:
-                    continue
-                
-                if asset_field:
-                    query = f"""
-                        WITH network_zone_coverage AS (
-                            SELECT 
-                                `{zone_field.field_name}` as network_zone,
-                                COUNT(DISTINCT COALESCE(LOWER(TRIM(`{asset_field.field_name}`)), '')) as assets_in_zone,
-                                COUNT(*) as total_zone_records
-                            FROM `{self.project_id}.{table_name}`
-                            WHERE `{zone_field.field_name}` IS NOT NULL
-                            AND `{asset_field.field_name}` IS NOT NULL
-                            GROUP BY `{zone_field.field_name}`
-                        )
-                        SELECT 
-                            network_zone,
-                            assets_in_zone,
-                            total_zone_records,
-                            ROUND(assets_in_zone * 100.0 / SUM(assets_in_zone) OVER(), 2) as zone_coverage_percentage
-                        FROM network_zone_coverage
-                        ORDER BY assets_in_zone DESC
-                    """
-                    key_fields = [zone_field.field_name, asset_field.field_name]
-                    confidence = (zone_field.confidence_score + asset_field.confidence_score) / 2
-                else:
-                    query = f"""
-                        SELECT 
-                            `{zone_field.field_name}` as network_zone,
-                            COUNT(*) as zone_record_count
-                        FROM `{self.project_id}.{table_name}`
-                        WHERE `{zone_field.field_name}` IS NOT NULL
-                        GROUP BY `{zone_field.field_name}`
-                        ORDER BY zone_record_count DESC
-                    """
-                    key_fields = [zone_field.field_name]
-                    confidence = zone_field.confidence_score
-                
-                queries.append(GeneratedQuery(
-                    purpose=f"Network Zone Coverage - {table_name}.{zone_field.field_name}",
-                    query=query.strip(),
-                    source_tables=[table_name],
-                    key_fields=key_fields,
-                    expected_result_type="network_zone_coverage",
-                    confidence_score=confidence
-                ))
-        
-        return queries
-    
-    def _generate_log_volume_queries(self, semantic_results: Dict[str, List[FieldAnalysis]]) -> List[GeneratedQuery]:
-        queries = []
-        
-        for table_name, fields in semantic_results.items():
-            volume_fields = [f for f in fields if 'volume' in f.field_name.lower() or 'ingest' in f.field_name.lower() or 'count' in f.field_name.lower()]
-            log_field = self._find_best_field(fields, 'log_sources')
-            asset_field = self._find_best_field(fields, ['asset_identity', 'network_identity'])
-            
-            for volume_field in volume_fields:
-                if volume_field.confidence_score < 0.6:
-                    continue
-                
-                if log_field and asset_field:
-                    query = f"""
-                        WITH log_volume_analysis AS (
-                            SELECT 
-                                `{log_field.field_name}` as log_type,
-                                COALESCE(LOWER(TRIM(`{asset_field.field_name}`)), 'unknown') as asset_identifier,
-                                SUM(CAST(`{volume_field.field_name}` AS NUMERIC)) as total_log_volume,
-                                COUNT(*) as log_entries
-                            FROM `{self.project_id}.{table_name}`
-                            WHERE `{volume_field.field_name}` IS NOT NULL
-                            AND `{log_field.field_name}` IS NOT NULL
-                            GROUP BY `{log_field.field_name}`, asset_identifier
-                        )
-                        SELECT 
-                            log_type,
-                            COUNT(DISTINCT asset_identifier) as assets_with_logs,
-                            SUM(total_log_volume) as total_volume,
-                            ROUND(AVG(total_log_volume), 2) as avg_volume_per_asset,
-                            SUM(log_entries) as total_entries
-                        FROM log_volume_analysis
-                        WHERE asset_identifier != 'unknown'
-                        GROUP BY log_type
-                        ORDER BY total_volume DESC
-                    """
-                    key_fields = [volume_field.field_name, log_field.field_name, asset_field.field_name]
-                    confidence = (volume_field.confidence_score + log_field.confidence_score + asset_field.confidence_score) / 3
-                else:
-                    query = f"""
-                        SELECT 
-                            SUM(CAST(`{volume_field.field_name}` AS NUMERIC)) as total_volume,
-                            COUNT(*) as total_records,
-                            ROUND(AVG(CAST(`{volume_field.field_name}` AS NUMERIC)), 2) as average_volume
-                        FROM `{self.project_id}.{table_name}`
-                        WHERE `{volume_field.field_name}` IS NOT NULL
-                    """
-                    key_fields = [volume_field.field_name]
-                    confidence = volume_field.confidence_score
-                
-                queries.append(GeneratedQuery(
-                    purpose=f"Log Volume Analysis - {table_name}.{volume_field.field_name}",
-                    query=query.strip(),
-                    source_tables=[table_name],
-                    key_fields=key_fields,
-                    expected_result_type="log_volume_analysis",
-                    confidence_score=confidence
-                ))
+        coverage_metrics_queries = self._generate_coverage_metrics_queries(semantic_results)
+        queries.extend(coverage_metrics_queries)
         
         return queries
     
@@ -534,8 +189,7 @@ class QueryGenerator:
                 query = f"""
                     SELECT 
                         `{log_type_field.field_name}` as log_type,
-                        COUNT(*) as total_events,
-                        COUNT(DISTINCT DATE(`{log_type_field.field_name}`)) as days_with_data
+                        COUNT(*) as total_events
                     FROM `{self.project_id}.{table_name}`
                     WHERE `{log_type_field.field_name}` IS NOT NULL
                     GROUP BY `{log_type_field.field_name}`
@@ -669,15 +323,190 @@ class QueryGenerator:
         
         return queries
     
+    def _generate_infrastructure_type_queries(self, semantic_results: Dict[str, List[FieldAnalysis]]) -> List[GeneratedQuery]:
+        queries = []
+        infra_tables = self._find_tables_with_category(semantic_results, 'infrastructure_type')
+        
+        for table_name, infra_fields in infra_tables.items():
+            infra_field = self._find_best_field(infra_fields, 'infrastructure_type')
+            asset_field = self._find_best_field(infra_fields, ['asset_identity', 'network_identity'])
+            
+            if not infra_field:
+                continue
+                
+            if asset_field:
+                query = f"""
+                    WITH infrastructure_coverage AS (
+                        SELECT 
+                            `{infra_field.field_name}` as infrastructure_type,
+                            COUNT(DISTINCT COALESCE(LOWER(TRIM(`{asset_field.field_name}`)), '')) as unique_assets,
+                            COUNT(*) as total_records
+                        FROM `{self.project_id}.{table_name}`
+                        WHERE `{infra_field.field_name}` IS NOT NULL
+                        AND `{asset_field.field_name}` IS NOT NULL
+                        GROUP BY `{infra_field.field_name}`
+                    )
+                    SELECT 
+                        infrastructure_type,
+                        unique_assets,
+                        total_records,
+                        ROUND(unique_assets * 100.0 / SUM(unique_assets) OVER(), 2) as percentage_of_assets
+                    FROM infrastructure_coverage
+                    ORDER BY unique_assets DESC
+                """
+                key_fields = [infra_field.field_name, asset_field.field_name]
+                confidence = (infra_field.confidence_score + asset_field.confidence_score) / 2
+            else:
+                query = f"""
+                    SELECT 
+                        `{infra_field.field_name}` as infrastructure_type,
+                        COUNT(*) as record_count,
+                        ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 2) as percentage
+                    FROM `{self.project_id}.{table_name}`
+                    WHERE `{infra_field.field_name}` IS NOT NULL
+                    GROUP BY `{infra_field.field_name}`
+                    ORDER BY record_count DESC
+                """
+                key_fields = [infra_field.field_name]
+                confidence = infra_field.confidence_score
+            
+            queries.append(GeneratedQuery(
+                purpose=f"Infrastructure Type Distribution - {table_name}",
+                query=query.strip(),
+                source_tables=[table_name],
+                key_fields=key_fields,
+                expected_result_type="infrastructure_coverage",
+                confidence_score=confidence
+            ))
+        
+        return queries
+    
+    def _generate_system_classification_queries(self, semantic_results: Dict[str, List[FieldAnalysis]]) -> List[GeneratedQuery]:
+        queries = []
+        system_tables = self._find_tables_with_category(semantic_results, 'system_classification')
+        
+        for table_name, system_fields in system_tables.items():
+            system_field = self._find_best_field(system_fields, 'system_classification')
+            asset_field = self._find_best_field(system_fields, ['asset_identity', 'network_identity'])
+            
+            if not system_field:
+                continue
+            
+            if asset_field:
+                query = f"""
+                    WITH system_classification_coverage AS (
+                        SELECT 
+                            `{system_field.field_name}` as system_type,
+                            COUNT(DISTINCT COALESCE(LOWER(TRIM(`{asset_field.field_name}`)), '')) as classified_assets,
+                            COUNT(*) as total_entries
+                        FROM `{self.project_id}.{table_name}`
+                        WHERE `{system_field.field_name}` IS NOT NULL
+                        AND `{asset_field.field_name}` IS NOT NULL
+                        GROUP BY `{system_field.field_name}`
+                    )
+                    SELECT 
+                        system_type,
+                        classified_assets,
+                        total_entries,
+                        ROUND(classified_assets * 100.0 / SUM(classified_assets) OVER(), 2) as classification_percentage
+                    FROM system_classification_coverage
+                    ORDER BY classified_assets DESC
+                """
+                key_fields = [system_field.field_name, asset_field.field_name]
+                confidence = (system_field.confidence_score + asset_field.confidence_score) / 2
+            else:
+                query = f"""
+                    SELECT 
+                        `{system_field.field_name}` as system_type,
+                        COUNT(*) as classification_count
+                    FROM `{self.project_id}.{table_name}`
+                    WHERE `{system_field.field_name}` IS NOT NULL
+                    GROUP BY `{system_field.field_name}`
+                    ORDER BY classification_count DESC
+                """
+                key_fields = [system_field.field_name]
+                confidence = system_field.confidence_score
+            
+            queries.append(GeneratedQuery(
+                purpose=f"System Classification Analysis - {table_name}",
+                query=query.strip(),
+                source_tables=[table_name],
+                key_fields=key_fields,
+                expected_result_type="system_classification",
+                confidence_score=confidence
+            ))
+        
+        return queries
+    
+    def _generate_coverage_metrics_queries(self, semantic_results: Dict[str, List[FieldAnalysis]]) -> List[GeneratedQuery]:
+        queries = []
+        metrics_tables = self._find_tables_with_category(semantic_results, 'coverage_metrics')
+        
+        for table_name, metrics_fields in metrics_tables.items():
+            metrics_field = self._find_best_field(metrics_fields, 'coverage_metrics')
+            dimension_field = self._find_best_field(metrics_fields, ['asset_identity', 'security_tools', 'business_context'])
+            
+            if not metrics_field:
+                continue
+            
+            if dimension_field:
+                query = f"""
+                    WITH coverage_analysis AS (
+                        SELECT 
+                            `{dimension_field.field_name}` as dimension,
+                            AVG(CAST(`{metrics_field.field_name}` AS NUMERIC)) as avg_coverage,
+                            MIN(CAST(`{metrics_field.field_name}` AS NUMERIC)) as min_coverage,
+                            MAX(CAST(`{metrics_field.field_name}` AS NUMERIC)) as max_coverage,
+                            COUNT(*) as record_count
+                        FROM `{self.project_id}.{table_name}`
+                        WHERE `{metrics_field.field_name}` IS NOT NULL
+                        AND `{dimension_field.field_name}` IS NOT NULL
+                        GROUP BY `{dimension_field.field_name}`
+                    )
+                    SELECT 
+                        dimension,
+                        ROUND(avg_coverage, 2) as average_coverage,
+                        ROUND(min_coverage, 2) as minimum_coverage,
+                        ROUND(max_coverage, 2) as maximum_coverage,
+                        record_count
+                    FROM coverage_analysis
+                    ORDER BY avg_coverage DESC
+                """
+                key_fields = [metrics_field.field_name, dimension_field.field_name]
+                confidence = (metrics_field.confidence_score + dimension_field.confidence_score) / 2
+            else:
+                query = f"""
+                    SELECT 
+                        AVG(CAST(`{metrics_field.field_name}` AS NUMERIC)) as overall_average,
+                        MIN(CAST(`{metrics_field.field_name}` AS NUMERIC)) as overall_minimum,
+                        MAX(CAST(`{metrics_field.field_name}` AS NUMERIC)) as overall_maximum,
+                        COUNT(*) as total_records
+                    FROM `{self.project_id}.{table_name}`
+                    WHERE `{metrics_field.field_name}` IS NOT NULL
+                """
+                key_fields = [metrics_field.field_name]
+                confidence = metrics_field.confidence_score
+            
+            queries.append(GeneratedQuery(
+                purpose=f"Coverage Metrics Analysis - {table_name}",
+                query=query.strip(),
+                source_tables=[table_name],
+                key_fields=key_fields,
+                expected_result_type="coverage_metrics",
+                confidence_score=confidence
+            ))
+        
+        return queries
+    
     def _find_tables_with_category(self, semantic_results: Dict[str, List[FieldAnalysis]], category: str) -> Dict[str, List[FieldAnalysis]]:
         matching_tables = {}
         for table_name, fields in semantic_results.items():
-            category_fields = [f for f in fields if f.ao1_category == category and f.confidence_score > 0.6]
+            category_fields = [f for f in fields if f.ao1_category == category and f.confidence_score > 0.5]
             if category_fields:
                 matching_tables[table_name] = category_fields
         return matching_tables
     
-    def _find_best_field(self, fields: List[FieldAnalysis], categories: str | List[str]) -> Optional[FieldAnalysis]:
+    def _find_best_field(self, fields: List[FieldAnalysis], categories) -> Optional[FieldAnalysis]:
         if isinstance(categories, str):
             categories = [categories]
         
@@ -697,7 +526,8 @@ class QueryGenerator:
             'edr': 'EDR',
             'endpoint': 'Endpoint Security',
             'agent': 'Security Agent',
-            'security': 'Security Tool'
+            'security': 'Security Tool',
+            'falcon': 'CrowdStrike Falcon'
         }
         
         for indicator, name in tool_indicators.items():

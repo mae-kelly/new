@@ -12,7 +12,7 @@ SERVICE_ACCOUNT_FILE = os.path.join(file_path, "gcp_prod_key.json")
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from ao1_scanner.scanner import AO1Scanner
+from scanner import AO1Scanner
 
 def main():
     logging.basicConfig(

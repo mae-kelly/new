@@ -15,12 +15,12 @@ class BigQueryConnection:
     
     def _connect(self, service_account_path):
         try:
-            file_path = os.path.dirname(os.path.abspath(__file__))
-            
             if service_account_path and os.path.exists(service_account_path):
                 SERVICE_ACCOUNT_FILE_PATH = service_account_path
             else:
-                SERVICE_ACCOUNT_FILE_PATH = os.path.join(file_path, SERVICE_ACCOUNT_FILE)
+                file_path = os.path.dirname(os.path.abspath(__file__))
+                parent_dir = os.path.dirname(file_path)
+                SERVICE_ACCOUNT_FILE_PATH = os.path.join(parent_dir, SERVICE_ACCOUNT_FILE)
             
             if not os.path.exists(SERVICE_ACCOUNT_FILE_PATH):
                 raise FileNotFoundError(f"Service account file not found: {SERVICE_ACCOUNT_FILE_PATH}")
@@ -61,29 +61,34 @@ class BigQueryConnection:
         table = self.client.get_table(table_ref)
         return table.schema
     
-    def sample_table_data(self, dataset_id, table_id, limit=100, fields=None):
-        if fields:
-            field_list = ', '.join([f'`{field}`' for field in fields])
+    def batch_sample_table_data(self, dataset_id, table_id, fields=None, limit=20):
+        try:
+            if fields:
+                field_list = ', '.join([f'`{field}`' for field in fields])
+            else:
+                field_list = '*'
+            
             query = f"""
                 SELECT {field_list}
-                FROM `{self.project_id}.{dataset_id}.{table_id}`
-                WHERE RAND() < 0.1
+                FROM `{self.project_id}.{dataset_id}.{table_id}` TABLESAMPLE SYSTEM (0.1 PERCENT)
                 LIMIT {limit}
             """
-        else:
-            query = f"""
-                SELECT *
-                FROM `{self.project_id}.{dataset_id}.{table_id}`
-                WHERE RAND() < 0.1
-                LIMIT {limit}
-            """
-        
-        try:
+            
             job = self.client.query(query)
             return list(job.result())
         except Exception as e:
             logger.warning(f"Failed to sample data from {dataset_id}.{table_id}: {e}")
-            return []
+            try:
+                query = f"""
+                    SELECT {field_list}
+                    FROM `{self.project_id}.{dataset_id}.{table_id}`
+                    LIMIT {limit}
+                """
+                job = self.client.query(query)
+                return list(job.result())
+            except Exception as e2:
+                logger.warning(f"Fallback sampling also failed: {e2}")
+                return []
     
     def execute_query(self, query):
         try:

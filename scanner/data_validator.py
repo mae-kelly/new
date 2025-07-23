@@ -108,6 +108,12 @@ class DataValidator:
                 quality_checks.extend(self._validate_log_coverage(row_dict))
             elif expected_type == "geographic_coverage":
                 quality_checks.extend(self._validate_geographic_coverage(row_dict))
+            elif expected_type == "relationship_analysis":
+                quality_checks.extend(self._validate_relationship_analysis(row_dict))
+            elif expected_type == "infrastructure_coverage":
+                quality_checks.extend(self._validate_infrastructure_coverage(row_dict))
+            elif expected_type == "system_classification":
+                quality_checks.extend(self._validate_system_classification(row_dict))
             else:
                 quality_checks.extend(self._validate_generic_data(row_dict))
         
@@ -177,6 +183,42 @@ class DataValidator:
         
         return checks if checks else [0.5]
     
+    def _validate_relationship_analysis(self, row: Dict) -> List[float]:
+        checks = []
+        
+    def _validate_relationship_analysis(self, row: Dict) -> List[float]:
+        checks = []
+        
+        has_match_type = any('match' in key.lower() or 'type' in key.lower() for key in row.keys())
+        checks.append(1.0 if has_match_type else 0.0)
+        
+        has_count_metric = any('count' in key.lower() or 'relationship' in key.lower() for key in row.keys())
+        checks.append(1.0 if has_count_metric else 0.0)
+        
+        return checks if checks else [0.5]
+    
+    def _validate_infrastructure_coverage(self, row: Dict) -> List[float]:
+        checks = []
+        
+        has_infrastructure_type = any('infrastructure' in key.lower() or 'type' in key.lower() for key in row.keys())
+        checks.append(1.0 if has_infrastructure_type else 0.0)
+        
+        has_metric = any('asset' in key.lower() or 'count' in key.lower() or 'percentage' in key.lower() for key in row.keys())
+        checks.append(1.0 if has_metric else 0.0)
+        
+        return checks if checks else [0.5]
+    
+    def _validate_system_classification(self, row: Dict) -> List[float]:
+        checks = []
+        
+        has_system_type = any('system' in key.lower() or 'type' in key.lower() or 'classification' in key.lower() for key in row.keys())
+        checks.append(1.0 if has_system_type else 0.0)
+        
+        has_metric = any('asset' in key.lower() or 'count' in key.lower() for key in row.keys())
+        checks.append(1.0 if has_metric else 0.0)
+        
+        return checks if checks else [0.5]
+    
     def _validate_generic_data(self, row: Dict) -> List[float]:
         checks = []
         
@@ -223,6 +265,14 @@ class DataValidator:
         elif expected_type == "tool_coverage":
             if not any(any('tool' in str(key).lower() or 'coverage' in str(key).lower() for key in dict(row).keys()) for row in results):
                 errors.append("Tool coverage query should return tool or coverage related fields")
+        
+        elif expected_type == "log_coverage":
+            if not any(any('log' in str(key).lower() for key in dict(row).keys()) for row in results):
+                errors.append("Log coverage query should return log-related fields")
+        
+        elif expected_type == "geographic_coverage":
+            if not any(any('geographic' in str(key).lower() or 'location' in str(key).lower() for key in dict(row).keys()) for row in results):
+                errors.append("Geographic coverage query should return location-related fields")
         
         for row in results[:10]:
             row_dict = dict(row)

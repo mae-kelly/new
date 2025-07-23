@@ -7,10 +7,10 @@ from typing import Dict, List, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .connection import BigQueryConnection
-from .semantic_analyzer import SemanticAnalyzer, FieldAnalysis
+from .semantic_analyzer import AdvancedSemanticAnalyzer, FieldAnalysis
 from .query_generator import QueryGenerator, GeneratedQuery
 from .data_validator import DataValidator, ValidationResult, TableQualityMetrics
-from .config import RESULTS_OUTPUT_DIR, CONTENT_ANALYSIS_SAMPLE_SIZE, MIN_CONFIDENCE_SCORE
+from .config import RESULTS_OUTPUT_DIR, MIN_CONFIDENCE_SCORE
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ class AO1Scanner:
         self.output_dir.mkdir(exist_ok=True)
         
         self.connection = BigQueryConnection(service_account_path)
-        self.semantic_analyzer = SemanticAnalyzer()
+        self.semantic_analyzer = AdvancedSemanticAnalyzer()
         self.query_generator = QueryGenerator()
         self.data_validator = DataValidator(self.connection)
         
@@ -28,7 +28,7 @@ class AO1Scanner:
         self.discovered_queries = []
         self.validation_results = []
         
-    def scan_all_datasets(self, max_workers: int = 4, quick_scan: bool = False) -> Dict[str, Any]:
+    def scan_all_datasets(self, max_workers: int = 6, quick_scan: bool = False) -> Dict[str, Any]:
         logger.info("Starting AO1 semantic scan of all BigQuery datasets")
         start_time = time.time()
         
@@ -39,17 +39,19 @@ class AO1Scanner:
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_dataset = {
-                executor.submit(self._analyze_dataset, dataset.dataset_id, quick_scan): dataset.dataset_id
+                executor.submit(self._analyze_dataset_optimized, dataset.dataset_id, quick_scan): dataset.dataset_id
                 for dataset in datasets
             }
             
+            completed = 0
             for future in as_completed(future_to_dataset):
                 dataset_id = future_to_dataset[future]
                 try:
                     dataset_analysis = future.result()
                     if dataset_analysis:
                         semantic_results.update(dataset_analysis)
-                        logger.info(f"Completed semantic analysis of dataset: {dataset_id}")
+                        completed += 1
+                        logger.info(f"Completed {completed}/{len(datasets)}: {dataset_id}")
                 except Exception as e:
                     logger.error(f"Failed to analyze dataset {dataset_id}: {e}")
         
@@ -59,9 +61,9 @@ class AO1Scanner:
         
         logger.info(f"Generated {len(generated_queries)} queries for validation")
         
-        if not quick_scan:
+        if not quick_scan and generated_queries:
             logger.info("Validating generated queries")
-            validation_results = self.data_validator.validate_queries(generated_queries)
+            validation_results = self.data_validator.validate_queries(generated_queries[:20])
             self.validation_results = validation_results
         else:
             self.validation_results = []
@@ -81,7 +83,7 @@ class AO1Scanner:
                 'execution_time_seconds': round(total_time, 2),
                 'quick_scan': quick_scan
             },
-            'semantic_analysis': semantic_results,
+            'semantic_analysis': self._serialize_semantic_results(semantic_results),
             'generated_queries': [self._serialize_query(q) for q in generated_queries],
             'validation_results': [self._serialize_validation(v) for v in self.validation_results],
             'relationships': relationships,
@@ -93,15 +95,19 @@ class AO1Scanner:
         
         return results
     
-    def _analyze_dataset(self, dataset_id: str, quick_scan: bool) -> Optional[Dict[str, List[FieldAnalysis]]]:
+    def _analyze_dataset_optimized(self, dataset_id: str, quick_scan: bool) -> Optional[Dict[str, List[FieldAnalysis]]]:
         try:
             tables = self.connection.list_tables(dataset_id)
             if not tables:
                 return None
             
             dataset_results = {}
+            table_limit = 10 if quick_scan else 50
             
-            for table in tables:
+            for i, table in enumerate(tables):
+                if i >= table_limit:
+                    break
+                
                 try:
                     if table.table_type != 'TABLE':
                         continue
@@ -109,27 +115,22 @@ class AO1Scanner:
                     table_key = f"{dataset_id}.{table.table_id}"
                     
                     schema = self.connection.get_table_schema(dataset_id, table.table_id)
+                    if not schema:
+                        continue
                     
-                    table_analysis = []
+                    table_data = self.connection.batch_sample_table_data(
+                        dataset_id, table.table_id, 
+                        fields=[f.name for f in schema[:20]], 
+                        limit=15 if quick_scan else 25
+                    )
                     
-                    for field in schema:
-                        if quick_scan and len(table_analysis) >= 5:
-                            break
-                        
-                        sample_values = self._get_field_sample_values(
-                            dataset_id, table.table_id, field.name, 
-                            limit=50 if quick_scan else CONTENT_ANALYSIS_SAMPLE_SIZE
-                        )
-                        
-                        field_analysis = self.semantic_analyzer.analyze_field(
-                            field.name, field.field_type, sample_values
-                        )
-                        
-                        if field_analysis.confidence_score >= MIN_CONFIDENCE_SCORE:
-                            table_analysis.append(field_analysis)
+                    if not table_data:
+                        continue
                     
-                    if table_analysis:
-                        dataset_results[table_key] = table_analysis
+                    field_analyses = self.semantic_analyzer.analyze_batch_fields(table_data, schema)
+                    
+                    if field_analyses:
+                        dataset_results[table_key] = field_analyses
                         
                 except Exception as e:
                     logger.warning(f"Failed to analyze table {dataset_id}.{table.table_id}: {e}")
@@ -141,28 +142,23 @@ class AO1Scanner:
             logger.error(f"Failed to analyze dataset {dataset_id}: {e}")
             return None
     
-    def _get_field_sample_values(self, dataset_id: str, table_id: str, field_name: str, limit: int) -> List[str]:
-        try:
-            sample_data = self.connection.sample_table_data(
-                dataset_id, table_id, limit=limit, fields=[field_name]
-            )
-            
-            values = []
-            for row in sample_data:
-                if hasattr(row, field_name):
-                    value = getattr(row, field_name)
-                    if value is not None:
-                        values.append(str(value))
-                elif isinstance(row, dict) and field_name in row:
-                    value = row[field_name]
-                    if value is not None:
-                        values.append(str(value))
-            
-            return values
-            
-        except Exception as e:
-            logger.warning(f"Failed to get sample values for {field_name}: {e}")
-            return []
+    def _serialize_semantic_results(self, semantic_results: Dict[str, List[FieldAnalysis]]) -> Dict:
+        serialized = {}
+        for table_name, analyses in semantic_results.items():
+            serialized[table_name] = []
+            for analysis in analyses:
+                serialized[table_name].append({
+                    'field_name': analysis.field_name,
+                    'field_type': analysis.field_type,
+                    'ao1_category': analysis.ao1_category,
+                    'confidence_score': analysis.confidence_score,
+                    'semantic_evidence': analysis.semantic_evidence,
+                    'sample_values': analysis.sample_values,
+                    'value_patterns': analysis.value_patterns,
+                    'reasoning_explanation': analysis.reasoning_explanation,
+                    'alternative_classifications': analysis.alternative_classifications or []
+                })
+        return serialized
     
     def _generate_scan_summary(self, semantic_results: Dict, queries: List[GeneratedQuery], 
                               validations: List[ValidationResult]) -> Dict[str, Any]:
@@ -178,7 +174,7 @@ class AO1Scanner:
                 category = field.ao1_category
                 category_counts[category] = category_counts.get(category, 0) + 1
                 
-                if field.confidence_score >= 0.8:
+                if field.confidence_score >= 0.7:
                     high_confidence_fields += 1
         
         successful_queries = sum(1 for v in validations if v.success)
@@ -219,7 +215,7 @@ class AO1Scanner:
         recommendations = []
         
         asset_tables = [t for t, fields in semantic_results.items() 
-                       if any(f.ao1_category == 'asset_identity' and f.confidence_score > 0.8 for f in fields)]
+                       if any(f.ao1_category == 'asset_identity' and f.confidence_score > 0.7 for f in fields)]
         
         if len(asset_tables) > 1:
             recommendations.append(f"Found {len(asset_tables)} high-quality asset tables - consider using the largest as your baseline")
@@ -229,7 +225,7 @@ class AO1Scanner:
         tool_coverage = {}
         for table, fields in semantic_results.items():
             for field in fields:
-                if field.ao1_category == 'security_tools' and field.confidence_score > 0.7:
+                if field.ao1_category == 'security_tools' and field.confidence_score > 0.6:
                     if 'crowdstrike' in field.field_name.lower():
                         tool_coverage['crowdstrike'] = tool_coverage.get('crowdstrike', 0) + 1
                     if 'chronicle' in field.field_name.lower():
@@ -242,12 +238,8 @@ class AO1Scanner:
                 recommendations.append(f"Multiple {tool.title()} data sources found ({count} tables) - consolidation opportunity")
         
         failed_queries = [v for v in validations if not v.success]
-        if len(failed_queries) > len(validations) * 0.2:
+        if len(failed_queries) > len(validations) * 0.3:
             recommendations.append("High query failure rate - data quality issues detected")
-        
-        slow_queries = [v for v in validations if v.execution_time_ms > 10000]
-        if slow_queries:
-            recommendations.append(f"{len(slow_queries)} queries are slow - consider adding indexes or partitioning")
         
         geographic_tables = [t for t, fields in semantic_results.items() 
                            if any(f.ao1_category == 'geographic_data' for f in fields)]
@@ -321,7 +313,7 @@ class AO1Scanner:
         
         logger.info(f"Summary saved to: {summary_file}")
     
-    def get_best_queries(self, min_confidence: float = 0.8) -> List[GeneratedQuery]:
+    def get_best_queries(self, min_confidence: float = 0.7) -> List[GeneratedQuery]:
         return [q for q in self.discovered_queries if q.confidence_score >= min_confidence]
     
     def get_validation_summary(self) -> Dict[str, Any]:

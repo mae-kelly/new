@@ -4,11 +4,11 @@ from database_connector import DatabaseConnector
 from advanced_semantic_analyzer import AdvancedSemanticAnalyzer
 from advanced_ao1_engine_part1 import AdvancedAO1Engine
 from advanced_ao1_engine_part2 import AdvancedAO1EngineExecutor
+import time
 
 def run_ao1_analysis(database_path: str):
     print("🧠 Starting Advanced AO1 Analysis...")
     
-    # 1. Connect to database
     db_connector = DatabaseConnector(database_path)
     if not db_connector.connect():
         print("❌ Failed to connect to database")
@@ -16,49 +16,54 @@ def run_ao1_analysis(database_path: str):
         
     print("✅ Connected to database")
     
-    # 2. Discover schema
     schema = db_connector.discover_schema()
     print(f"📊 Discovered {sum(len(cols) for cols in schema.values())} fields in {len(schema)} tables")
     
-    # 3. Analyze fields with advanced semantics
     analyzer = AdvancedSemanticAnalyzer()
     intelligent_fields = []
     
-    field_count = 0
+    promising_fields = []
     for table_name, columns in schema.items():
-        for column_name, data_type in columns:
-            if field_count >= 100:  # Limit for demo
+        for column_name, data_type in columns[:20]:
+            name_lower = column_name.lower()
+            if any(keyword in name_lower for keyword in ['host', 'asset', 'log', 'time', 'count', 'device', 'server', 'source', 'platform', 'event', 'message']):
+                promising_fields.append((table_name, column_name, data_type))
+            if len(promising_fields) >= 40:
                 break
-                
-            try:
-                sample_values = db_connector.sample_field_data(table_name, column_name, 1000)
-                field_intelligence = analyzer.analyze_field_deeply(
-                    column_name, table_name, data_type, sample_values
-                )
-                
-                if field_intelligence.intelligence_score > 0.5:
-                    intelligent_fields.append(field_intelligence)
-                    
-                field_count += 1
-                
-                if field_count % 20 == 0:
-                    print(f"   Analyzed {field_count} fields...")
-                    
-            except Exception as e:
-                print(f"   Warning: Failed to analyze {table_name}.{column_name}: {e}")
-                
-        if field_count >= 100:
+        if len(promising_fields) >= 40:
             break
+    
+    print(f"📊 Analyzing {len(promising_fields)} promising fields...")
+    
+    start_time = time.time()
+    for field_count, (table_name, column_name, data_type) in enumerate(promising_fields):
+        if time.time() - start_time > 180:
+            print(f"⏰ Timeout reached, processed {field_count} fields")
+            break
+            
+        try:
+            sample_values = db_connector.sample_field_data(table_name, column_name, 50)
+            
+            if len(sample_values) < 3:
+                continue
+                
+            field_intelligence = analyzer.analyze_field_deeply(
+                column_name, table_name, data_type, sample_values
+            )
+            
+            if field_intelligence.intelligence_score > 0.4:
+                intelligent_fields.append(field_intelligence)
+                print(f"   ✓ {table_name}.{column_name}: {field_intelligence.intelligence_score:.2f}")
+                
+        except Exception as e:
+            print(f"   ⚠️ Failed {table_name}.{column_name}: {str(e)[:50]}")
     
     print(f"✅ Found {len(intelligent_fields)} high-intelligence fields")
     
-    # 4. Generate AO1 Dashboard
     ao1_engine = AdvancedAO1Engine(db_connector)
     
-    # Combine with part 2 functionality
     executor = AdvancedAO1EngineExecutor(ao1_engine)
     
-    # Monkey patch the methods we need
     ao1_engine._build_intelligent_global_visibility = executor._build_intelligent_global_visibility
     ao1_engine._build_intelligent_platform_coverage = executor._build_intelligent_platform_coverage
     ao1_engine._build_intelligent_infrastructure_visibility = executor._build_intelligent_infrastructure_visibility
@@ -70,7 +75,6 @@ def run_ao1_analysis(database_path: str):
     print("🎯 Generating AO1 Dashboard...")
     dashboard = ao1_engine.generate_intelligent_ao1_dashboard(intelligent_fields)
     
-    # 5. Display Results
     print("\n🎯 AO1 DASHBOARD RESULTS")
     print("=" * 50)
     print(f"Success Rate: {dashboard.success_rate:.1f}%")
@@ -100,10 +104,7 @@ def run_ao1_analysis(database_path: str):
     print()
     print("🎉 Analysis Complete!")
     
-    # 6. Save Queries (optional)
-    import json
     from datetime import datetime
-    
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     if dashboard.global_visibility_score:

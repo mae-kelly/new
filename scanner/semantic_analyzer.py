@@ -1,275 +1,422 @@
-import re
 import logging
 import numpy as np
-from typing import List, Dict, Tuple, Any, Optional
-from dataclasses import dataclass
-from collections import Counter, defaultdict
-from fuzzywuzzy import fuzz
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-import string
-
-from .config import AO1_CONCEPTS, FUZZY_MATCH_THRESHOLD, SEMANTIC_SIMILARITY_THRESHOLD
+from typing import List, Dict, Any
+from collections import defaultdict
+from .nlp import FoundationModels, SpecializedModels, LinguisticResources
+from .semantic import EmbeddingManager, ReasoningEngine, SemanticMemory, FieldAnalysis, TableContext
+from .config import AO1_CONCEPTS, MIN_CONFIDENCE_SCORE
 
 logger = logging.getLogger(__name__)
 
-@dataclass
-class FieldAnalysis:
-    field_name: str
-    field_type: str
-    ao1_category: str
-    confidence_score: float
-    semantic_evidence: List[str]
-    sample_values: List[str]
-    value_patterns: List[str]
-
-class SemanticAnalyzer:
+class AdvancedSemanticAnalyzer:
     def __init__(self):
-        self.vectorizer = TfidfVectorizer(
-            max_features=1000,
-            stop_words='english',
-            ngram_range=(1, 2),
-            lowercase=True
-        )
+        self.embedding_manager = EmbeddingManager()
+        self.reasoning_engine = ReasoningEngine()
+        self.semantic_memory = SemanticMemory()
+        self.specialized_models = SpecializedModels()
+        self.linguistic_resources = LinguisticResources()
+        
         self.ao1_concepts = AO1_CONCEPTS
-        self._prepare_concept_vectors()
+        self.analysis_cache = {}
     
-    def _prepare_concept_vectors(self):
-        all_texts = []
-        self.concept_mappings = {}
+    def analyze_batch_fields(self, table_data: List[Dict], schema_fields: List) -> List[FieldAnalysis]:
+        field_analyses = []
         
-        for concept, data in self.ao1_concepts.items():
-            combined_text = ' '.join(data['content_indicators'] + [p.replace('.*', '').replace(r'\.', '') for p in data['patterns']])
-            all_texts.append(combined_text)
-            self.concept_mappings[len(all_texts) - 1] = concept
+        # Extract field samples
+        field_samples = self._extract_field_samples(table_data, schema_fields)
         
-        try:
-            self.concept_vectors = self.vectorizer.fit_transform(all_texts)
-        except Exception as e:
-            logger.warning(f"Failed to create concept vectors: {e}")
-            self.concept_vectors = None
+        # Analyze table context
+        table_context = self._analyze_table_context(field_samples, schema_fields)
+        
+        # Process each field
+        for field in schema_fields:
+            field_name = field.name
+            field_type = field.field_type
+            sample_values = field_samples.get(field_name, [])
+            
+            analysis = self._analyze_single_field(field_name, field_type, sample_values, table_context)
+            
+            if analysis.confidence_score > MIN_CONFIDENCE_SCORE:
+                field_analyses.append(analysis)
+                self._update_learning(analysis, table_context)
+        
+        # Apply cross-field reasoning
+        field_analyses = self._apply_cross_field_reasoning(field_analyses, table_context)
+        
+        return field_analyses
     
-    def analyze_field(self, field_name: str, field_type: str, sample_values: List[str]) -> FieldAnalysis:
-        ao1_category, confidence, evidence = self._classify_field(field_name, field_type, sample_values)
-        value_patterns = self._extract_value_patterns(sample_values)
+    def _extract_field_samples(self, table_data: List[Dict], schema_fields: List) -> Dict[str, List[str]]:
+        field_samples = {}
+        
+        for field in schema_fields:
+            field_name = field.name
+            field_samples[field_name] = []
+            
+            for row in table_data:
+                try:
+                    value = None
+                    if hasattr(row, field_name):
+                        value = getattr(row, field_name)
+                    elif isinstance(row, dict) and field_name in row:
+                        value = row[field_name]
+                    
+                    if value is not None and str(value).strip():
+                        field_samples[field_name].append(str(value).strip())
+                except Exception:
+                    continue
+        
+        return field_samples
+    
+    def _analyze_table_context(self, field_samples: Dict[str, List[str]], schema_fields: List) -> TableContext:
+        field_names = list(field_samples.keys())
+        
+        # Detect semantic themes
+        semantic_themes = self._detect_semantic_themes(field_names, field_samples)
+        
+        # Detect domain indicators
+        domain_indicators = self._detect_domain_indicators(field_names, field_samples)
+        
+        # Analyze structural patterns
+        structural_patterns = self._analyze_structural_patterns(field_samples)
+        
+        # Analyze data characteristics
+        data_characteristics = self._analyze_data_characteristics(field_samples)
+        
+        return TableContext(
+            field_names=field_names,
+            semantic_themes=semantic_themes,
+            domain_indicators=domain_indicators,
+            structural_patterns=structural_patterns,
+            data_characteristics=data_characteristics,
+            confidence_signals=[]
+        )
+    
+    def _detect_semantic_themes(self, field_names: List[str], field_samples: Dict[str, List[str]]) -> List[str]:
+        themes = []
+        
+        all_field_text = ' '.join(field_names).lower()
+        
+        theme_indicators = {
+            'asset_management': ['host', 'asset', 'device', 'machine', 'computer', 'server'],
+            'network_infrastructure': ['ip', 'network', 'dns', 'url', 'address', 'domain'],
+            'security_monitoring': ['agent', 'security', 'crowdstrike', 'edr', 'sensor'],
+            'logging_audit': ['log', 'event', 'audit', 'source', 'siem'],
+            'geographic_location': ['country', 'region', 'location', 'site', 'datacenter'],
+            'business_organization': ['business', 'unit', 'department', 'owner', 'application']
+        }
+        
+        for theme, indicators in theme_indicators.items():
+            if any(indicator in all_field_text for indicator in indicators):
+                themes.append(theme)
+        
+        return themes
+    
+    def _detect_domain_indicators(self, field_names: List[str], field_samples: Dict[str, List[str]]) -> List[str]:
+        indicators = []
+        
+        domain_patterns = {
+            'cybersecurity': ['security', 'agent', 'edr', 'siem', 'threat'],
+            'it_infrastructure': ['server', 'network', 'infrastructure', 'system'],
+            'data_management': ['log', 'data', 'source', 'collection', 'ingest'],
+            'identity_management': ['user', 'identity', 'authentication', 'access'],
+            'compliance_audit': ['audit', 'compliance', 'policy', 'governance']
+        }
+        
+        all_text = ' '.join(field_names + [v for values in field_samples.values() for v in values[:3]]).lower()
+        
+        for domain, patterns in domain_patterns.items():
+            if any(pattern in all_text for pattern in patterns):
+                indicators.append(domain)
+        
+        return indicators
+    
+    def _analyze_structural_patterns(self, field_samples: Dict[str, List[str]]) -> Dict[str, Any]:
+        patterns = {
+            'field_count': len(field_samples),
+            'avg_values_per_field': sum(len(values) for values in field_samples.values()) / max(len(field_samples), 1),
+            'id_fields': [],
+            'categorical_fields': [],
+            'numeric_fields': []
+        }
+        
+        for field_name, values in field_samples.items():
+            if not values:
+                continue
+            
+            # Detect ID fields
+            if any(term in field_name.lower() for term in ['id', 'identifier', 'key']):
+                patterns['id_fields'].append(field_name)
+            
+            # Detect categorical fields
+            unique_ratio = len(set(values)) / len(values) if values else 0
+            if unique_ratio < 0.5 and len(set(values)) < 20:
+                patterns['categorical_fields'].append(field_name)
+            
+            # Detect numeric fields
+            numeric_count = sum(1 for v in values if str(v).replace('.', '').replace('-', '').isdigit())
+            if numeric_count / len(values) > 0.8:
+                patterns['numeric_fields'].append(field_name)
+        
+        return patterns
+    
+    def _analyze_data_characteristics(self, field_samples: Dict[str, List[str]]) -> Dict[str, Any]:
+        characteristics = {
+            'data_density': 0.0,
+            'completeness': 0.0,
+            'value_diversity': 0.0,
+            'pattern_consistency': 0.0
+        }
+        
+        total_fields = len(field_samples)
+        if total_fields == 0:
+            return characteristics
+        
+        # Calculate data density
+        non_empty_fields = sum(1 for values in field_samples.values() if values)
+        characteristics['data_density'] = non_empty_fields / total_fields
+        
+        # Calculate completeness
+        total_values = sum(len(values) for values in field_samples.values())
+        characteristics['completeness'] = total_values / (total_fields * 20)  # Assuming max 20 samples per field
+        
+        # Calculate value diversity
+        diversities = []
+        for values in field_samples.values():
+            if values:
+                unique_ratio = len(set(values)) / len(values)
+                diversities.append(unique_ratio)
+        characteristics['value_diversity'] = sum(diversities) / len(diversities) if diversities else 0
+        
+        return characteristics
+    
+    def _analyze_single_field(self, field_name: str, field_type: str, sample_values: List[str], 
+                             table_context: TableContext) -> FieldAnalysis:
+        # Get field embedding
+        field_embedding = self.embedding_manager.get_field_embedding(field_name, sample_values, table_context.__dict__)
+        
+        # Compute semantic scores for each concept
+        concept_scores = {}
+        for concept in self.ao1_concepts.keys():
+            # Base semantic similarity
+            semantic_score = self.embedding_manager.compute_semantic_similarity(field_embedding, concept)
+            
+            # Add learned patterns score
+            learned_score = self.semantic_memory.get_learned_score(field_name, concept, table_context.__dict__)
+            
+            # Add linguistic analysis score
+            linguistic_score = self._compute_linguistic_score(field_name, sample_values, concept)
+            
+            # Add pattern matching score
+            pattern_score = self._compute_pattern_score(sample_values, concept)
+            
+            # Combine scores
+            combined_score = (
+                semantic_score * 0.4 +
+                learned_score * 0.25 +
+                linguistic_score * 0.2 +
+                pattern_score * 0.15
+            ) * self.ao1_concepts[concept]['weight']
+            
+            if combined_score > 0.1:
+                concept_scores[concept] = combined_score
+        
+        # Apply multi-step reasoning
+        if concept_scores:
+            best_concept, final_confidence, explanation = self.reasoning_engine.perform_multi_step_reasoning(
+                field_name, sample_values, concept_scores, table_context
+            )
+        else:
+            best_concept, final_confidence, explanation = 'unknown', 0.0, "No semantic matches found"
+        
+        # Calibrate confidence
+        calibrated_confidence = self.semantic_memory.get_calibrated_confidence(best_concept, final_confidence)
+        
+        # Extract value patterns
+        value_patterns = self._extract_value_patterns(sample_values, best_concept)
+        
+        # Generate alternatives
+        alternatives = [(concept, score) for concept, score in concept_scores.items() 
+                       if concept != best_concept and score > calibrated_confidence * 0.3]
+        alternatives = sorted(alternatives, key=lambda x: x[1], reverse=True)[:3]
         
         return FieldAnalysis(
             field_name=field_name,
             field_type=field_type,
-            ao1_category=ao1_category,
-            confidence_score=confidence,
-            semantic_evidence=evidence,
-            sample_values=sample_values[:10],
-            value_patterns=value_patterns
+            ao1_category=best_concept,
+            confidence_score=calibrated_confidence,
+            semantic_evidence=[f"reasoning: {explanation}"],
+            sample_values=sample_values[:5],
+            value_patterns=value_patterns,
+            reasoning_explanation=explanation,
+            alternative_classifications=alternatives
         )
     
-    def _classify_field(self, field_name: str, field_type: str, sample_values: List[str]) -> Tuple[str, float, List[str]]:
-        scores = {}
-        evidence = defaultdict(list)
+    def _compute_linguistic_score(self, field_name: str, sample_values: List[str], concept: str) -> float:
+        score = 0.0
         
-        for concept, config in self.ao1_concepts.items():
-            score = 0.0
-            concept_evidence = []
-            
-            name_score = self._analyze_field_name(field_name, config)
-            if name_score > 0:
-                score += name_score * 0.4
-                concept_evidence.append(f"field_name_match({name_score:.2f})")
-            
-            content_score = self._analyze_field_content(sample_values, config)
-            if content_score > 0:
-                score += content_score * 0.6
-                concept_evidence.append(f"content_match({content_score:.2f})")
-            
-            if score > 0:
-                scores[concept] = score * config['weight']
-                evidence[concept] = concept_evidence
+        # Analyze field name linguistically
+        field_features = self.linguistic_resources.analyze_linguistic_features(field_name)
         
-        if not scores:
-            return 'unknown', 0.0, ['no_matches']
+        # Check POS tag alignment
+        concept_pos_preferences = {
+            'asset_identity': ['NOUN'],
+            'network_identity': ['NOUN', 'ADJ'],
+            'security_tools': ['NOUN', 'VERB'],
+            'log_sources': ['NOUN'],
+            'geographic_data': ['NOUN', 'PROPN'],
+            'coverage_metrics': ['NOUN', 'NUM']
+        }
         
-        best_concept = max(scores.keys(), key=lambda k: scores[k])
-        return best_concept, scores[best_concept], evidence[best_concept]
+        if concept in concept_pos_preferences:
+            pos_distribution = field_features.get('pos_distribution', {})
+            preferred_pos = concept_pos_preferences[concept]
+            
+            matching_pos = sum(pos_distribution.get(pos, 0) for pos in preferred_pos)
+            total_pos = sum(pos_distribution.values())
+            
+            if total_pos > 0:
+                score += (matching_pos / total_pos) * 0.6
+        
+        # Check entity alignment
+        entities = field_features.get('entities', [])
+        concept_entity_preferences = {
+            'asset_identity': ['ORG', 'MISC'],
+            'network_identity': ['MISC'],
+            'security_tools': ['ORG'],
+            'geographic_data': ['LOC', 'GPE']
+        }
+        
+        if concept in concept_entity_preferences and entities:
+            preferred_entities = concept_entity_preferences[concept]
+            matching_entities = sum(1 for _, entity_type in entities if entity_type in preferred_entities)
+            score += (matching_entities / len(entities)) * 0.4
+        
+        return min(1.0, score)
     
-    def _analyze_field_name(self, field_name: str, config: Dict) -> float:
-        cleaned_name = self._clean_field_name(field_name)
-        max_score = 0.0
-        
-        for pattern in config['patterns']:
-            try:
-                if re.search(pattern, cleaned_name, re.IGNORECASE):
-                    max_score = max(max_score, 0.9)
-            except re.error:
-                continue
-        
-        for indicator in config['content_indicators']:
-            fuzzy_score = fuzz.partial_ratio(cleaned_name.lower(), indicator.lower()) / 100.0
-            if fuzzy_score >= FUZZY_MATCH_THRESHOLD:
-                max_score = max(max_score, fuzzy_score)
-        
-        if self.concept_vectors is not None:
-            semantic_score = self._semantic_similarity(cleaned_name, config['content_indicators'])
-            max_score = max(max_score, semantic_score)
-        
-        return max_score
-    
-    def _analyze_field_content(self, sample_values: List[str], config: Dict) -> float:
+    def _compute_pattern_score(self, sample_values: List[str], concept: str) -> float:
         if not sample_values:
             return 0.0
         
-        cleaned_values = [self._clean_value(v) for v in sample_values if v is not None]
-        if not cleaned_values:
-            return 0.0
+        concept_patterns = self.ao1_concepts.get(concept, {}).get('value_patterns', [])
+        if not concept_patterns:
+            return 0.5
         
-        pattern_matches = 0
-        total_patterns = len(config['value_patterns'])
+        matches = 0
+        for value in sample_values:
+            value_str = str(value)
+            for pattern in concept_patterns:
+                try:
+                    import re
+                    if re.search(pattern, value_str, re.IGNORECASE):
+                        matches += 1
+                        break
+                except:
+                    continue
         
-        for pattern in config['value_patterns']:
-            try:
-                pattern_obj = re.compile(pattern, re.IGNORECASE)
-                matches = sum(1 for value in cleaned_values if pattern_obj.search(str(value)))
-                if matches > 0:
-                    pattern_matches += matches / len(cleaned_values)
-            except re.error:
-                continue
-        
-        if total_patterns == 0:
-            return 0.0
-        
-        content_indicators_score = 0.0
-        for indicator in config['content_indicators']:
-            indicator_matches = sum(1 for value in cleaned_values 
-                                 if fuzz.partial_ratio(str(value).lower(), indicator.lower()) >= FUZZY_MATCH_THRESHOLD * 100)
-            if indicator_matches > 0:
-                content_indicators_score = max(content_indicators_score, indicator_matches / len(cleaned_values))
-        
-        return max(pattern_matches / total_patterns, content_indicators_score)
+        return matches / len(sample_values) if sample_values else 0.0
     
-    def _semantic_similarity(self, text: str, indicators: List[str]) -> float:
-        try:
-            combined_indicators = ' '.join(indicators)
-            texts = [text, combined_indicators]
-            vectors = self.vectorizer.transform(texts)
-            similarity = cosine_similarity(vectors[0:1], vectors[1:2])[0][0]
-            return similarity if similarity >= SEMANTIC_SIMILARITY_THRESHOLD else 0.0
-        except Exception:
-            return 0.0
-    
-    def _clean_field_name(self, field_name: str) -> str:
-        cleaned = re.sub(r'[_\-\.]', ' ', field_name)
-        cleaned = re.sub(r'([a-z])([A-Z])', r'\1 \2', cleaned)
-        return cleaned.strip()
-    
-    def _clean_value(self, value: Any) -> str:
-        if value is None:
-            return ''
-        
-        str_value = str(value).strip()
-        if not str_value or str_value.lower() in ['null', 'none', 'n/a', '']:
-            return ''
-        
-        return str_value
-    
-    def _extract_value_patterns(self, sample_values: List[str]) -> List[str]:
-        if not sample_values:
-            return []
-        
+    def _extract_value_patterns(self, sample_values: List[str], concept: str) -> List[str]:
         patterns = []
-        cleaned_values = [self._clean_value(v) for v in sample_values if v]
         
-        if not cleaned_values:
-            return []
+        if not sample_values:
+            return patterns
         
-        common_patterns = [
-            (r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', 'ipv4_address'),
-            (r'^[a-zA-Z0-9\-\.]+\.(com|local|corp|internal|net|org)$', 'fqdn'),
-            (r'^[a-zA-Z0-9\-]+\d+$', 'alphanumeric_with_number'),
-            (r'^[A-Z]{2,3}$', 'country_code'),
-            (r'.*[Aa]gent.*', 'agent_reference'),
-            (r'.*[Ll]og.*', 'log_reference'),
-            (r'.*[Hh]ost.*', 'host_reference')
-        ]
+        # Common patterns
+        pattern_detectors = {
+            'ipv4_address': r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$',
+            'fqdn': r'^[a-zA-Z0-9\-\.]+\.(com|local|corp|internal|net|org)$',
+            'uuid': r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+            'email': r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+            'url': r'^https?://[^\s]+$',
+            'numeric_id': r'^\d+$',
+            'alphanumeric_id': r'^[a-zA-Z0-9\-]+\d+$',
+            'crowdstrike_ref': r'.*crowdstrike.*|.*falcon.*',
+            'chronicle_ref': r'.*chronicle.*',
+            'splunk_ref': r'.*splunk.*'
+        }
         
-        for pattern, name in common_patterns:
-            try:
-                pattern_obj = re.compile(pattern, re.IGNORECASE)
-                matches = sum(1 for value in cleaned_values if pattern_obj.search(value))
-                if matches > len(cleaned_values) * 0.3:
-                    patterns.append(name)
-            except re.error:
-                continue
-        
-        value_lengths = [len(v) for v in cleaned_values if v]
-        if value_lengths:
-            avg_length = sum(value_lengths) / len(value_lengths)
-            if avg_length > 20:
-                patterns.append('long_text')
-            elif avg_length < 5:
-                patterns.append('short_code')
+        import re
+        for pattern_name, pattern_regex in pattern_detectors.items():
+            matches = sum(1 for value in sample_values 
+                         if re.search(pattern_regex, str(value), re.IGNORECASE))
+            if matches > len(sample_values) * 0.2:
+                patterns.append(pattern_name)
         
         return patterns
+    
+    def _apply_cross_field_reasoning(self, field_analyses: List[FieldAnalysis], 
+                                   table_context: TableContext) -> List[FieldAnalysis]:
+        # Build concept distribution
+        concept_counts = defaultdict(int)
+        for analysis in field_analyses:
+            concept_counts[analysis.ao1_category] += 1
+        
+        # Apply consistency boost/penalty
+        for analysis in field_analyses:
+            concept = analysis.ao1_category
+            
+            # Boost confidence for concepts that appear multiple times
+            if concept_counts[concept] > 1:
+                boost = min(0.1, concept_counts[concept] * 0.03)
+                analysis.confidence_score = min(1.0, analysis.confidence_score + boost)
+                analysis.semantic_evidence.append(f"cross_field_consistency_boost({boost:.3f})")
+        
+        return field_analyses
+    
+    def _update_learning(self, analysis: FieldAnalysis, table_context: TableContext):
+        self.semantic_memory.learn_from_analysis(
+            analysis.field_name,
+            analysis.ao1_category,
+            analysis.confidence_score,
+            analysis.sample_values,
+            table_context.__dict__
+        )
     
     def find_relationships(self, tables_analysis: Dict[str, List[FieldAnalysis]]) -> List[Dict]:
         relationships = []
         
-        asset_tables = self._get_tables_by_category(tables_analysis, 'asset_identity')
-        security_tables = self._get_tables_by_category(tables_analysis, 'security_tools')
-        network_tables = self._get_tables_by_category(tables_analysis, 'network_identity')
+        # Find tables with same concepts
+        concept_tables = defaultdict(list)
+        for table_name, analyses in tables_analysis.items():
+            for analysis in analyses:
+                if analysis.confidence_score > 0.5:
+                    concept_tables[analysis.ao1_category].append((table_name, analysis))
         
-        for asset_table in asset_tables:
-            for security_table in security_tables:
-                relationship = self._analyze_table_relationship(asset_table, security_table, tables_analysis)
-                if relationship:
-                    relationships.append(relationship)
+        # Build relationships
+        for concept, table_analyses in concept_tables.items():
+            if len(table_analyses) > 1:
+                for i, (table1, analysis1) in enumerate(table_analyses):
+                    for table2, analysis2 in table_analyses[i+1:]:
+                        if table1 != table2:
+                            similarity = self._compute_field_similarity(analysis1, analysis2)
+                            if similarity > 0.6:
+                                relationships.append({
+                                    'table1': table1,
+                                    'table2': table2,
+                                    'field1': analysis1.field_name,
+                                    'field2': analysis2.field_name,
+                                    'concept': concept,
+                                    'similarity': similarity,
+                                    'confidence': min(analysis1.confidence_score, analysis2.confidence_score)
+                                })
         
         return relationships
     
-    def _get_tables_by_category(self, tables_analysis: Dict[str, List[FieldAnalysis]], category: str) -> List[str]:
-        matching_tables = []
-        for table_name, fields in tables_analysis.items():
-            for field in fields:
-                if field.ao1_category == category and field.confidence_score > 0.7:
-                    matching_tables.append(table_name)
-                    break
-        return matching_tables
-    
-    def _analyze_table_relationship(self, table1: str, table2: str, tables_analysis: Dict) -> Optional[Dict]:
-        table1_fields = tables_analysis.get(table1, [])
-        table2_fields = tables_analysis.get(table2, [])
+    def _compute_field_similarity(self, analysis1: FieldAnalysis, analysis2: FieldAnalysis) -> float:
+        from fuzzywuzzy import fuzz
         
-        potential_joins = []
+        # Name similarity
+        name_sim = fuzz.token_sort_ratio(analysis1.field_name, analysis2.field_name) / 100.0
         
-        for field1 in table1_fields:
-            for field2 in table2_fields:
-                if (field1.ao1_category == field2.ao1_category and 
-                    field1.confidence_score > 0.6 and field2.confidence_score > 0.6):
-                    
-                    similarity = self._field_similarity(field1, field2)
-                    if similarity > 0.7:
-                        potential_joins.append({
-                            'field1': field1.field_name,
-                            'field2': field2.field_name,
-                            'category': field1.ao1_category,
-                            'similarity': similarity
-                        })
+        # Pattern similarity
+        patterns1 = set(analysis1.value_patterns)
+        patterns2 = set(analysis2.value_patterns)
+        pattern_sim = len(patterns1 & patterns2) / max(len(patterns1 | patterns2), 1)
         
-        if potential_joins:
-            return {
-                'table1': table1,
-                'table2': table2,
-                'join_candidates': potential_joins,
-                'relationship_strength': max(j['similarity'] for j in potential_joins)
-            }
+        # Confidence similarity
+        conf_sim = min(analysis1.confidence_score, analysis2.confidence_score)
         
-        return None
-    
-    def _field_similarity(self, field1: FieldAnalysis, field2: FieldAnalysis) -> float:
-        name_similarity = fuzz.ratio(field1.field_name, field2.field_name) / 100.0
-        
-        pattern_overlap = len(set(field1.value_patterns) & set(field2.value_patterns))
-        max_patterns = max(len(field1.value_patterns), len(field2.value_patterns), 1)
-        pattern_similarity = pattern_overlap / max_patterns
-        
-        confidence_similarity = min(field1.confidence_score, field2.confidence_score)
-        
-        return (name_similarity * 0.3 + pattern_similarity * 0.4 + confidence_similarity * 0.3)
+        return (name_sim * 0.4 + pattern_sim * 0.4 + conf_sim * 0.2)
+
+# Alias for backward compatibility
+SemanticAnalyzer = AdvancedSemanticAnalyzer

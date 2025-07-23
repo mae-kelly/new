@@ -5,7 +5,7 @@ import logging
 import sys
 from pathlib import Path
 
-from .scanner import AO1Scanner
+from scanner.scanner import AO1Scanner
 
 def setup_logging(verbose: bool = False):
     level = logging.DEBUG if verbose else logging.INFO
